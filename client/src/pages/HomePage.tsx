@@ -61,7 +61,8 @@ export default function HomePage() {
     }
   };
 
-  const formatPickupTime = (start: Date, end: Date) => {
+  const formatPickupTime = (start: Date | null, end: Date | null) => {
+    if (!start || !end) return "Pickup time not specified";
     const options: Intl.DateTimeFormatOptions = { 
       month: 'short', 
       day: 'numeric', 
