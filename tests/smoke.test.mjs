@@ -26,12 +26,28 @@ for (const mode of ['production', 'development']) {
       assert.equal(page.status, 200);
       assert.match(await page.text(), /src\/main|\/assets\/index/);
       assert.deepEqual(await (await fetch(`${base}/api/food-listings`)).json(), []);
+      assert.deepEqual(await (await fetch(`${base}/api/organizations`)).json(), []);
+      assert.equal((await fetch(`${base}/api/organizations/missing`)).status, 404);
+      assert.equal((await fetch(`${base}/api/my-listings`)).status, 404);
+      assert.equal((await fetch(`${base}/api/food-listings/missing`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 404);
+      assert.equal((await fetch(`${base}/api/food-listings/missing`, { method: 'DELETE' })).status, 404);
+      assert.equal((await fetch(`${base}/api/food-listings`, { method: 'POST', body: new FormData() })).status, 400);
       const form = new FormData();
       for (const [k, v] of Object.entries({ title: 'Smoke test', description: 'Local test only', quantity: '1 item', category: 'other', location: 'Test location', latitude: '44.65', longitude: '-63.58', donorId: 'smoke-test', pickupTimeStart: '2026-11-11T12:00:00Z', pickupTimeEnd: '2026-11-11T13:00:00Z' })) form.set(k, v);
       const created = await fetch(`${base}/api/food-listings`, { method: 'POST', body: form });
       assert.equal(created.status, 201);
       const listing = await created.json();
       assert.equal(listing.title, 'Smoke test');
+      assert.equal((await fetch(`${base}/api/food-listings/${listing.id}`)).status, 200);
+      assert.equal((await (await fetch(`${base}/api/food-listings`)).json()).length, 1);
+      assert.deepEqual(await (await fetch(`${base}/api/sensor-data/${listing.id}`)).json(), []);
+      const reading = await fetch(`${base}/api/sensor-data`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ listingId: listing.id, temperature: 4, humidity: 60 }) });
+      assert.equal(reading.status, 201);
+      const sensors = await (await fetch(`${base}/api/sensor-data/${listing.id}`)).json();
+      assert.equal(sensors.length, 1);
+      assert.equal(sensors[0].temperature, 4);
+      assert.equal((await fetch(`${base}/api/sensor-data`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 400);
+
       const claimed = await fetch(`${base}/api/food-listings/${listing.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'claimed' }) });
       assert.equal(claimed.status, 200);
       assert.equal((await claimed.json()).status, 'claimed');

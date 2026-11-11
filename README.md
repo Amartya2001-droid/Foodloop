@@ -51,4 +51,4 @@ No open issues or PRs existed at the initial audit. Day 1 changes are limited to
 
 See [AGENTS.md](AGENTS.md) for mandatory branch, PR, testing and daily reporting rules. Reports: [10-day agent program — daily log](https://github.com/Amartya2001-droid/Foodloop/issues/1).
 
-The package metadata says MIT, but no LICENSE file is tracked. A licence grant has not been verified; the owner must clarify it. No licence has been added or invented.
+The declared package licence is MIT; see [LICENSE](LICENSE). A Day 2 search of tracked text found no contradictory licence header or notice. This is not an audit of third-party dependencies or image provenance. See [DB-VERIFICATION.md](DB-VERIFICATION.md) for the memory-only schema and workflow verification, limitations, and follow-up triage.
