@@ -8,6 +8,7 @@ import path from "path";
 import { promises as fs } from "fs";
 import OpenAI from "openai";
 import { z } from "zod";
+import { installAuth, requireUser, userId } from "./auth";
 
 // Lazy initialization of OpenAI client
 let openai: OpenAI | null = null;
@@ -82,6 +83,7 @@ const upload = multer({
 });
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  installAuth(app);
   // Food Listings Routes
   
   // Get all available food listings
@@ -110,12 +112,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create new food listing with image upload
-  app.post("/api/food-listings", upload.single("image"), async (req, res) => {
+  app.post("/api/food-listings", requireUser, upload.single("image"), async (req, res) => {
     try {
       const data = {
         ...req.body,
-        pickupTimeStart: new Date(req.body.pickupTimeStart),
-        pickupTimeEnd: new Date(req.body.pickupTimeEnd),
+        donorId: userId(res),
+        expiryDate: req.body.expiryDate ? new Date(req.body.expiryDate) : null,
+        pickupTimeStart: req.body.pickupTimeStart ? new Date(req.body.pickupTimeStart) : null,
+        pickupTimeEnd: req.body.pickupTimeEnd ? new Date(req.body.pickupTimeEnd) : null,
         latitude: parseFloat(req.body.latitude),
         longitude: parseFloat(req.body.longitude),
         freshnessScore: parseInt(req.body.freshnessScore) || 85,
@@ -138,8 +142,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Update food listing (e.g., claim food)
-  app.patch("/api/food-listings/:id", async (req, res) => {
+  app.patch("/api/food-listings/:id", requireUser, async (req, res) => {
     try {
+      const existing = await storage.getFoodListing(req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Food listing not found' });
+      if (existing.donorId !== userId(res)) return res.status(403).json({ error: 'Only the donor may change this listing' });
       // Only allow updating specific fields to prevent uncontrolled updates
       const allowedUpdates = ["status"];
       const updates: any = {};
@@ -162,8 +169,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Delete food listing
-  app.delete("/api/food-listings/:id", async (req, res) => {
+  app.delete("/api/food-listings/:id", requireUser, async (req, res) => {
     try {
+      const existing = await storage.getFoodListing(req.params.id);
+      if (!existing) return res.status(404).json({ error: 'Food listing not found' });
+      if (existing.donorId !== userId(res)) return res.status(403).json({ error: 'Only the donor may change this listing' });
       const deleted = await storage.deleteFoodListing(req.params.id);
       if (!deleted) {
         return res.status(404).json({ error: "Food listing not found" });
@@ -176,16 +186,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Monitor/Dashboard Route - Get listings with claims for a specific donor
-  app.get("/api/my-listings", async (req, res) => {
+  app.get("/api/my-listings", requireUser, async (req, res) => {
     try {
-      // For demo, use hope_food_bank as the donor
-      const donorUsername = "hope_food_bank";
-      const donor = await storage.getUserByUsername(donorUsername);
-      
-      if (!donor) {
-        return res.status(404).json({ error: "Donor not found" });
-      }
-
+      const donor = res.locals.user;
       const listings = await storage.getAllFoodListings();
       const donorListings = listings.filter(l => l.donorId === donor.id);
       
@@ -267,9 +270,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create sensor data reading
-  app.post("/api/sensor-data", async (req, res) => {
+  app.post("/api/sensor-data", requireUser, async (req, res) => {
     try {
       const validated = insertSensorDataSchema.parse(req.body);
+      const listing = await storage.getFoodListing(validated.listingId);
+      if (!listing) return res.status(404).json({ error: 'Food listing not found' });
+      if (listing.donorId !== userId(res)) return res.status(403).json({ error: 'Only the donor may submit readings' });
       const data = await storage.createSensorData(validated);
       res.status(201).json(data);
     } catch (error: any) {
@@ -279,7 +285,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // AI Food Detection Route
-  app.post("/api/detect-food", upload.single("image"), async (req, res) => {
+  app.post("/api/detect-food", requireUser, upload.single("image"), async (req, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ error: "No image file provided" });
@@ -361,7 +367,7 @@ Be specific and practical. Focus on helping donors accurately describe their sur
   });
 
   // AI Chat Assistant Route
-  app.post("/api/chat", async (req, res) => {
+  app.post("/api/chat", requireUser, async (req, res) => {
     try {
       // Check rate limit
       const clientIp = req.ip || req.socket.remoteAddress || "unknown";

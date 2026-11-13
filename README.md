@@ -4,6 +4,14 @@ Food redistribution hackathon prototype built with React, Vite, Express, TypeScr
 
 **Live status: not live yet — blocked by deployment configuration, a provisioned database, and production security work.** No working public deployment has been verified. The previous README's `https://foodloop.replit.app` was labelled a demo and is not an established live URL.
 
+## Working authentication (feature PR)
+
+Registration, login, current-account lookup and logout now work in local memory mode. Passwords use salted scrypt hashes; opaque random session tokens are stored as hashes in a bounded, expiring server-side session map and delivered in HttpOnly, SameSite=Strict cookies. Sessions last 12 hours and reset on server restart, including in database mode. Credentials require 12–128 characters. There is no email verification, password recovery or multi-instance session persistence yet.
+
+Create an account using the account bar. Posting derives donor ownership from the session. Only the donor can edit/delete their listings or submit sensor readings; `/api/my-listings` uses the signed-in donor. Anonymous users may browse. AI endpoints require sign-in. Cross-origin browser mutations are rejected and sign-in attempts are rate limited per process. Account data and session tokens are excluded from response logs. For HTTPS hosting set `COOKIE_SECURE=true`; no secret is required for local opaque sessions. Run behind a same-origin HTTPS proxy before exposing externally.
+
+The sections below describing missing auth are the historical Day 1 audit; this section supersedes those auth findings. Reservation and display gaps remain until their separate feature PRs. DB-VERIFICATION.md records the pre-feature Day 2 snapshot.
+
 ## Run locally
 
 Use Node.js 22 and npm. No credentials are needed for the explicitly selected, empty in-memory mode:

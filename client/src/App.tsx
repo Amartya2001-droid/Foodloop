@@ -1,3 +1,4 @@
+import AccountBar from "@/components/AccountBar";
 import { Switch, Route } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -30,6 +31,7 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <Toaster />
+        <AccountBar />
         <Router />
       </TooltipProvider>
     </QueryClientProvider>

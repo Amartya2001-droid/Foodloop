@@ -143,7 +143,7 @@ export default function PostFoodForm({ onSubmit, onSuccess }: PostFoodFormProps)
       qualityScore: 85,
       defectsDetected: [],
       aiAnalysis: null,
-      donorId: "demo-user",
+
       image: imageFile || undefined,
     };
 
