@@ -8,6 +8,7 @@ import path from "path";
 import { promises as fs } from "fs";
 import OpenAI from "openai";
 import { z } from "zod";
+import { WorkflowError } from "./reservations";
 import { installAuth, requireUser, userId } from "./auth";
 
 // Lazy initialization of OpenAI client
@@ -84,6 +85,36 @@ const upload = multer({
 
 export async function registerRoutes(app: Express): Promise<Server> {
   installAuth(app);
+  app.use('/api', async (_req, res, next) => {
+    try { await storage.expireReservations(); next(); }
+    catch { res.status(503).json({ error: 'Reservation storage unavailable' }); }
+  });
+  const workflowFailure = (res: express.Response, error: unknown) => {
+    res.status(error instanceof WorkflowError ? error.status : error instanceof z.ZodError ? 400 : 500).json({ error: error instanceof WorkflowError ? error.message : error instanceof z.ZodError ? 'Invalid reservation details' : 'Reservation service unavailable' });
+  };
+  app.post('/api/food-listings/:id/reservations', requireUser, async (req, res) => {
+    try {
+      const body = z.object({ pickupAt: z.coerce.date(), contact: z.string().trim().min(3).max(200), notes: z.string().trim().max(1000).default('') }).parse(req.body);
+      const claim = await storage.reserveListing({ listingId: req.params.id, claimerId: userId(res), claimerName: res.locals.user.username, claimerContact: body.contact, pickupAt: body.pickupAt, pickupNotes: body.notes });
+      res.status(201).json(claim);
+    } catch (error) { workflowFailure(res, error); }
+  });
+  app.get('/api/reservations', requireUser, async (_req, res) => {
+    try {
+      const reservations = await storage.getReservationsForUser(userId(res));
+      res.json(await Promise.all(reservations.map(async claim => {
+        const listing = await storage.getFoodListing(claim.listingId);
+        const donor = listing && await storage.getUser(listing.donorId);
+        return { ...claim, listing, donorName: donor?.username ?? 'Unknown' };
+      })));
+    } catch (error) { workflowFailure(res, error); }
+  });
+  app.post('/api/reservations/:id/actions', requireUser, async (req, res) => {
+    try {
+      const { action } = z.object({ action: z.enum(['cancel', 'picked_up', 'complete']) }).parse(req.body);
+      res.json(await storage.transitionReservation(req.params.id, userId(res), action));
+    } catch (error) { workflowFailure(res, error); }
+  });
   // Food Listings Routes
   
   // Get all available food listings
@@ -147,21 +178,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const existing = await storage.getFoodListing(req.params.id);
       if (!existing) return res.status(404).json({ error: 'Food listing not found' });
       if (existing.donorId !== userId(res)) return res.status(403).json({ error: 'Only the donor may change this listing' });
-      // Only allow updating specific fields to prevent uncontrolled updates
-      const allowedUpdates = ["status"];
-      const updates: any = {};
-      
-      for (const key of allowedUpdates) {
-        if (req.body[key] !== undefined) {
-          updates[key] = req.body[key];
-        }
-      }
-
-      const updated = await storage.updateFoodListing(req.params.id, updates);
-      if (!updated) {
-        return res.status(404).json({ error: "Food listing not found" });
-      }
-      res.json(updated);
+      return res.status(400).json({ error: 'Use reservation actions to change lifecycle status' });
     } catch (error) {
       console.error("Error updating food listing:", error);
       res.status(500).json({ error: "Failed to update food listing" });
@@ -174,12 +191,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const existing = await storage.getFoodListing(req.params.id);
       if (!existing) return res.status(404).json({ error: 'Food listing not found' });
       if (existing.donorId !== userId(res)) return res.status(403).json({ error: 'Only the donor may change this listing' });
+      if (existing.status !== 'available' || (await storage.getClaimsForListing(existing.id)).length) return res.status(409).json({ error: 'Listings with reservation history cannot be deleted' });
       const deleted = await storage.deleteFoodListing(req.params.id);
       if (!deleted) {
         return res.status(404).json({ error: "Food listing not found" });
       }
       res.status(204).send();
     } catch (error) {
+      if (error instanceof WorkflowError) return res.status(error.status).json({ error: error.message });
       console.error("Error deleting food listing:", error);
       res.status(500).json({ error: "Failed to delete food listing" });
     }

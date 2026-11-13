@@ -1,3 +1,4 @@
+import { reserve, transition, WorkflowError, type ReserveInput, type Action } from "./reservations";
 import { type User, type InsertUser, type FoodListing, type InsertFoodListing, type SensorData, type InsertSensorData, type Claim, type InsertClaim, type Organization, type InsertOrganization, type SupplierRating, type InsertSupplierRating, users, foodListings, sensorData, claims, organizations, supplierRatings } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -25,6 +26,11 @@ export interface IStorage {
   getClaimsForListing(listingId: string): Promise<Claim[]>;
   createClaim(claim: InsertClaim): Promise<Claim>;
   
+  getReservation(id: string): Promise<Claim | undefined>;
+  getReservationsForUser(userId: string): Promise<Claim[]>;
+  reserveListing(input: ReserveInput): Promise<Claim>;
+  transitionReservation(id: string, actor: string, action: Action, now?: Date): Promise<Claim>;
+  expireReservations(now?: Date): Promise<void>;
   // Organizations
   getAllOrganizations(): Promise<Organization[]>;
   getOrganization(id: string): Promise<Organization | undefined>;
@@ -82,7 +88,7 @@ export class MemStorage implements IStorage {
 
   async getAvailableFoodListings(): Promise<FoodListing[]> {
     return Array.from(this.foodListings.values()).filter(
-      listing => listing.status === "available"
+      listing => listing.status === "available" && (!listing.expiryDate || listing.expiryDate > new Date())
     );
   }
 
@@ -115,6 +121,8 @@ export class MemStorage implements IStorage {
   }
 
   async deleteFoodListing(id: string): Promise<boolean> {
+    const listing = this.foodListings.get(id);
+    if (listing && (listing.status !== 'available' || [...this.claims.values()].some(claim => claim.listingId === id))) throw new WorkflowError(409, 'Listings with reservation history cannot be deleted');
     return this.foodListings.delete(id);
   }
 
@@ -147,10 +155,38 @@ export class MemStorage implements IStorage {
       ...insertClaim,
       id,
       claimedAt: new Date(),
+      claimerId: insertClaim.claimerId ?? null, pickupAt: insertClaim.pickupAt ?? null, expiresAt: insertClaim.expiresAt ?? null, pickupNotes: insertClaim.pickupNotes ?? null, completedAt: null,
       status: "pending",
     };
     this.claims.set(id, claim);
     return claim;
+  }
+
+  async getReservation(id: string) { return this.claims.get(id); }
+  async getReservationsForUser(userId: string) {
+    return [...this.claims.values()].filter(claim => claim.claimerId === userId || this.foodListings.get(claim.listingId)?.donorId === userId);
+  }
+  async reserveListing(input: ReserveInput) {
+    // No await between decision and writes: atomic within the memory process.
+    const listing = this.foodListings.get(input.listingId);
+    const claim = reserve(listing, input);
+    this.foodListings.set(input.listingId, { ...listing!, status: 'reserved' });
+    this.claims.set(claim.id, claim);
+    return claim;
+  }
+  async transitionReservation(id: string, actor: string, action: Action, now = new Date()) {
+    const claim = this.claims.get(id);
+    if (!claim) throw new WorkflowError(404, 'Reservation not found');
+    const listing = this.foodListings.get(claim.listingId)!;
+    const result = transition(listing, claim, actor, action, now);
+    this.claims.set(id, result.claim);
+    this.foodListings.set(listing.id, { ...listing, status: result.listingStatus });
+    return result.claim;
+  }
+  async expireReservations(now = new Date()) {
+    for (const claim of this.claims.values()) {
+      if (claim.status === 'reserved' && claim.expiresAt && claim.expiresAt <= now) await this.transitionReservation(claim.id, '', 'expire', now);
+    }
   }
 
   async getAllOrganizations(): Promise<Organization[]> {

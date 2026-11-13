@@ -1,0 +1,40 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { server, client, register, listingForm } from './helpers.mjs';
+test('reservation races, privacy, cancellation and confirmed pickup', async () => {
+  const app = await server(5127);
+  try {
+    const donor = client(app.base), recipient = client(app.base), other = client(app.base);
+    await register(donor, 'owner'); await register(recipient, 'recipient'); await register(other, 'stranger');
+    const created = await donor('/api/food-listings', 'POST', listingForm());
+    assert.equal(created.status, 201); const listing = await created.json();
+    const details = { pickupAt: new Date(Date.now() + 3600000).toISOString(), contact: 'test@example.invalid', notes: 'At the entrance' };
+    const path = `/api/food-listings/${listing.id}/reservations`;
+    assert.equal((await donor(path, 'POST', details)).status, 400);
+    assert.equal((await recipient(path, 'POST', { ...details, pickupAt: '2000-01-01' })).status, 400);
+    const results = await Promise.all([recipient(path, 'POST', details), other(path, 'POST', details)]);
+    assert.deepEqual(results.map(r => r.status).sort(), [201, 409]);
+    const winner = results[0].status === 201 ? recipient : other;
+    const loser = winner === recipient ? other : recipient;
+    const claim = await results.find(r => r.status === 201).json();
+    assert.deepEqual(await (await loser('/api/reservations')).json(), []);
+    assert.equal((await (await donor('/api/reservations')).json()).length, 1);
+    const action = (who, status) => who(`/api/reservations/${claim.id}/actions`, 'POST', { action: status });
+    assert.equal((await action(loser, 'cancel')).status, 403);
+    assert.equal((await action(donor, 'complete')).status, 409);
+    assert.equal((await donor(`/api/food-listings/${listing.id}`, 'PATCH', { status: 'completed' })).status, 400);
+    assert.equal((await donor(`/api/food-listings/${listing.id}`, 'DELETE')).status, 409);
+    assert.equal((await action(winner, 'cancel')).status, 200);
+    const again = await winner(path, 'POST', details); assert.equal(again.status, 201);
+    const second = await again.json();
+    const secondAction = (who, status) => who(`/api/reservations/${second.id}/actions`, 'POST', { action: status });
+    assert.equal((await secondAction(donor, 'picked_up')).status, 409);
+    assert.equal((await secondAction(winner, 'picked_up')).status, 200);
+    assert.equal((await secondAction(winner, 'complete')).status, 409);
+    assert.equal((await secondAction(winner, 'cancel')).status, 409);
+    const complete = await secondAction(donor, 'complete'); assert.equal(complete.status, 200);
+    assert.ok((await complete.json()).completedAt);
+    assert.equal((await secondAction(donor, 'complete')).status, 409);
+    assert.deepEqual(await (await winner('/api/food-listings')).json(), []);
+  } finally { await app.close(); }
+});

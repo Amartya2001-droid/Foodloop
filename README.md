@@ -4,6 +4,14 @@ Food redistribution hackathon prototype built with React, Vite, Express, TypeScr
 
 **Live status: not live yet — blocked by deployment configuration, a provisioned database, and production security work.** No working public deployment has been verified. The previous README's `https://foodloop.replit.app` was labelled a demo and is not an established live URL.
 
+## Reservations and pickup (feature PR)
+
+Signed-in recipients reserve available food with an arranged pickup time, private contact details and notes. The donor cannot reserve their own listing. A reservation expires two hours after the arranged pickup (or at food expiry, if earlier). Expiry is reconciled on API requests; it releases still-edible food and retains history. Either participant can cancel before pickup. The recipient marks pickup, then the donor confirms completion. Invalid transitions and concurrent reservations return conflicts. The monitor page shows both sides' reservation activity and donor listings, with actions based on identity.
+
+Lifecycle status cannot be changed through the generic PATCH endpoint. Listings with reservation history cannot be deleted. Memory operations run atomically within one process; the PostgreSQL adapter uses transactions and row locks, with a partial unique index as a second guard. The added claim columns/index are declared in Drizzle and in `migrations/0001_reservation_workflow.sql` for review against an existing database. Do not run both manual SQL and schema push blindly. No real database has been connected or migrated; `DATABASE_URL` is needed for that later validation. Local memory mode needs no schema setup or secrets.
+
+Tests cover simultaneous claims, privacy, actor permissions, cancellation/re-reservation, expiry, invalid transitions, and one-time confirmed completion. This supersedes the historical reservation gaps below. PRs are stacked: reservation depends on authentication.
+
 ## Working authentication (feature PR)
 
 Registration, login, current-account lookup and logout now work in local memory mode. Passwords use salted scrypt hashes; opaque random session tokens are stored as hashes in a bounded, expiring server-side session map and delivered in HttpOnly, SameSite=Strict cookies. Sessions last 12 hours and reset on server restart, including in database mode. Credentials require 12–128 characters. There is no email verification, password recovery or multi-instance session persistence yet.

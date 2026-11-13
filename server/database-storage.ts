@@ -1,7 +1,8 @@
+import { reserve, transition, WorkflowError, type ReserveInput, type Action } from "./reservations";
 import { type User, type InsertUser, type FoodListing, type InsertFoodListing, type SensorData, type InsertSensorData, type Claim, type InsertClaim, type Organization, type InsertOrganization, type SupplierRating, type InsertSupplierRating, users, foodListings, sensorData, claims, organizations, supplierRatings } from "@shared/schema";
 import type { IStorage } from "./storage";
 import { db } from "./db";
-import { eq } from "drizzle-orm";
+import { eq, or, inArray, and, isNull, gt } from "drizzle-orm";
 
 export class DatabaseStorage implements IStorage {
   async getUser(id: string): Promise<User | undefined> {
@@ -29,7 +30,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getAvailableFoodListings(): Promise<FoodListing[]> {
-    return await db.select().from(foodListings).where(eq(foodListings.status, "available"));
+    return await db.select().from(foodListings).where(and(eq(foodListings.status, "available"), or(isNull(foodListings.expiryDate), gt(foodListings.expiryDate, new Date()))));
   }
 
   async createFoodListing(insertListing: InsertFoodListing): Promise<FoodListing> {
@@ -46,8 +47,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteFoodListing(id: string): Promise<boolean> {
-    const result = await db.delete(foodListings).where(eq(foodListings.id, id)).returning();
-    return result.length > 0;
+    return db.transaction(async tx => {
+      const listing = (await tx.select().from(foodListings).where(eq(foodListings.id, id)).for('update'))[0];
+      if (!listing) return false;
+      const history = await tx.select().from(claims).where(eq(claims.listingId, id)).limit(1);
+      if (listing.status !== 'available' || history.length) throw new WorkflowError(409, 'Listings with reservation history cannot be deleted');
+      await tx.delete(foodListings).where(eq(foodListings.id, id));
+      return true;
+    });
   }
 
   async getSensorDataForListing(listingId: string): Promise<SensorData[]> {
@@ -68,6 +75,41 @@ export class DatabaseStorage implements IStorage {
   async createClaim(insertClaim: InsertClaim): Promise<Claim> {
     const result = await db.insert(claims).values(insertClaim).returning();
     return result[0];
+  }
+
+  async getReservation(id: string) {
+    return (await db.select().from(claims).where(eq(claims.id, id)))[0];
+  }
+  async getReservationsForUser(userId: string) {
+    const owned = db.select({ id: foodListings.id }).from(foodListings).where(eq(foodListings.donorId, userId));
+    return db.select().from(claims).where(or(eq(claims.claimerId, userId), inArray(claims.listingId, owned)));
+  }
+  async reserveListing(input: ReserveInput) {
+    return db.transaction(async tx => {
+      const listing = (await tx.select().from(foodListings).where(eq(foodListings.id, input.listingId)).for('update'))[0];
+      const claim = reserve(listing, input);
+      await tx.update(foodListings).set({ status: 'reserved' }).where(eq(foodListings.id, input.listingId));
+      return (await tx.insert(claims).values(claim).returning())[0];
+    });
+  }
+  async transitionReservation(id: string, actor: string, action: Action, now = new Date()) {
+    const initial = await this.getReservation(id);
+    if (!initial) throw new WorkflowError(404, 'Reservation not found');
+    return db.transaction(async tx => {
+      // Always lock listing first, including expiry, to serialize lifecycle actions.
+      const listing = (await tx.select().from(foodListings).where(eq(foodListings.id, initial.listingId)).for('update'))[0];
+      const claim = (await tx.select().from(claims).where(eq(claims.id, id)).for('update'))[0];
+      const result = transition(listing, claim, actor, action, now);
+      await tx.update(foodListings).set({ status: result.listingStatus }).where(eq(foodListings.id, listing.id));
+      return (await tx.update(claims).set({ status: result.claim.status, completedAt: result.claim.completedAt }).where(eq(claims.id, id)).returning())[0];
+    });
+  }
+  async expireReservations(now = new Date()) {
+    const pending = await db.select().from(claims).where(eq(claims.status, 'reserved'));
+    for (const claim of pending) if (claim.expiresAt && claim.expiresAt <= now) {
+      try { await this.transitionReservation(claim.id, '', 'expire', now); }
+      catch (error) { if (!(error instanceof WorkflowError && error.status === 409)) throw error; }
+    }
   }
 
   async getAllOrganizations(): Promise<Organization[]> {

@@ -1,3 +1,4 @@
+import ReservationForm from "@/components/ReservationForm";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
@@ -44,22 +45,8 @@ export default function HomePage() {
     queryFn: getFoodListings,
   });
 
-  const handleClaimFood = async (id: string) => {
-    try {
-      await updateFoodListing(id, { status: "claimed" });
-      toast({
-        title: "Food claimed!",
-        description: "You've successfully claimed this food item.",
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/food-listings"] });
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to claim food item",
-        variant: "destructive",
-      });
-    }
-  };
+  const [reservationId, setReservationId] = useState<string | null>(null);
+  const handleClaimFood = (id: string) => setReservationId(id);
 
   const formatPickupTime = (start: Date | null, end: Date | null) => {
     if (!start || !end) return "Pickup time not specified";
@@ -365,6 +352,11 @@ export default function HomePage() {
         </div>
       </footer>
 
+      <Dialog open={!!reservationId} onOpenChange={open => { if (!open) setReservationId(null); }}>
+        <DialogContent><DialogHeader><DialogTitle>Arrange a pickup</DialogTitle></DialogHeader>
+          {reservationId && <ReservationForm listingId={reservationId} onSuccess={() => { setReservationId(null); toast({ title: 'Reserved', description: 'Manage your pickup from Monitor.' }); }} />}
+        </DialogContent>
+      </Dialog>
       <Dialog open={showPostForm} onOpenChange={setShowPostForm}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>

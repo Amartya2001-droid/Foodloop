@@ -58,9 +58,8 @@ for (const mode of ['production', 'development']) {
       assert.equal((await request(`${base}/api/sensor-data`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 400);
 
       const claimed = await request(`${base}/api/food-listings/${listing.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'claimed' }) });
-      assert.equal(claimed.status, 200);
-      assert.equal((await claimed.json()).status, 'claimed');
-      assert.deepEqual(await (await request(`${base}/api/food-listings`)).json(), []);
+      assert.equal(claimed.status, 400);
+      assert.equal((await (await request(`${base}/api/food-listings`)).json()).length, 1);
       assert.equal((await request(`${base}/api/food-listings/${listing.id}`, { method: 'DELETE' })).status, 204);
       assert.equal((await request(`${base}/api/food-listings/${listing.id}`)).status, 404);
       assert.equal((await request(`${base}/api/chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: [{ role: 'user', content: 'Hello' }] }) })).status, 503);
