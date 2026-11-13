@@ -27,10 +27,12 @@ test('memory organization detail joins supplier fixtures without a database', as
     assert.equal(organization.verified, false);
     assert.equal(organization.suppliers.length, 1);
     assert.equal(organization.suppliers[0].supplierName, 'verification-supplier');
-    assert.equal(organization.suppliers[0].activeListings, 0);
-    assert.equal(organization.suppliers[0].totalListings, 0);
+    assert.equal(organization.suppliers[0].activeListings, 1);
+    assert.equal(organization.suppliers[0].totalListings, 1);
     assert.equal((await fetch(`${base}/api/organizations/missing`)).status, 404);
-    assert.equal((await fetch(`${base}/api/organizations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 404);
+    assert.equal(organization.suppliers[0].overallRating, undefined);
+    assert.equal(organization.suppliers[0].completedPickups, 0);
+    assert.equal((await fetch(`${base}/api/organizations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 401);
   } finally {
     child.kill('SIGTERM');
     await new Promise(resolve => child.exitCode !== null ? resolve() : child.once('exit', resolve));

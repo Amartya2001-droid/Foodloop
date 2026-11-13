@@ -17,6 +17,8 @@ export const foodListings = pgTable("food_listings", {
   category: text("category").notNull(),
   imageUrl: text("image_url"),
   cost: text("cost"),
+  weightKg: real("weight_kg"),
+  organizationId: varchar("organization_id").references(() => organizations.id),
   location: text("location").notNull(),
   latitude: real("latitude").notNull(),
   longitude: real("longitude").notNull(),
@@ -55,6 +57,7 @@ export const claims = pgTable("claims", {
 }, table => [uniqueIndex("one_active_reservation_per_listing").on(table.listingId).where(sql`${table.status} in ('reserved', 'picked_up')`)]);
 
 export const organizations = pgTable("organizations", {
+  ownerId: varchar("owner_id").references(() => users.id),
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
   type: text("type").notNull(),

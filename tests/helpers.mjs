@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import assert from 'node:assert/strict';
-export async function server(port) {
-  const child = spawn(process.execPath, ['dist/index.js'], { env: { ...process.env, NODE_ENV: 'production', STORAGE_MODE: 'memory', DATABASE_URL: '', OPENAI_API_KEY: '', PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
+export async function server(port, overrides = {}) {
+  const child = spawn(process.execPath, ['dist/index.js'], { env: { ...process.env, NODE_ENV: 'production', STORAGE_MODE: 'memory', DATABASE_URL: '', OPENAI_API_KEY: '', PORT: String(port), ...overrides }, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
   child.stdout.on('data', d => output += d); child.stderr.on('data', d => output += d);
   const base = `http://127.0.0.1:${port}`;

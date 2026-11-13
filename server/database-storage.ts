@@ -2,7 +2,7 @@ import { reserve, transition, WorkflowError, type ReserveInput, type Action } fr
 import { type User, type InsertUser, type FoodListing, type InsertFoodListing, type SensorData, type InsertSensorData, type Claim, type InsertClaim, type Organization, type InsertOrganization, type SupplierRating, type InsertSupplierRating, users, foodListings, sensorData, claims, organizations, supplierRatings } from "@shared/schema";
 import type { IStorage } from "./storage";
 import { db } from "./db";
-import { eq, or, inArray, and, isNull, gt } from "drizzle-orm";
+import { eq, or, inArray, and, isNull, gt, desc } from "drizzle-orm";
 
 export class DatabaseStorage implements IStorage {
   async getUser(id: string): Promise<User | undefined> {
@@ -60,7 +60,7 @@ export class DatabaseStorage implements IStorage {
   async getSensorDataForListing(listingId: string): Promise<SensorData[]> {
     return await db.select().from(sensorData)
       .where(eq(sensorData.listingId, listingId))
-      .orderBy(sensorData.timestamp);
+      .orderBy(desc(sensorData.timestamp));
   }
 
   async createSensorData(insertData: InsertSensorData): Promise<SensorData> {
@@ -77,6 +77,7 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
+  async getAllClaims() { return db.select().from(claims); }
   async getReservation(id: string) {
     return (await db.select().from(claims).where(eq(claims.id, id)))[0];
   }

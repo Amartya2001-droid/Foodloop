@@ -1,3 +1,5 @@
+import { installDataRoutes, supplierSummaries } from "./data-routes";
+import { inspectImage } from "./inspections";
 import type { Express } from "express";
 import express from "express";
 import { createServer, type Server } from "http";
@@ -21,6 +23,8 @@ function getOpenAIClient(): OpenAI {
   if (!openai) {
     openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
+      ...(process.env.OPENAI_BASE_URL ? { baseURL: process.env.OPENAI_BASE_URL } : {}),
+      timeout: 20000, maxRetries: 0,
     });
   }
   return openai;
@@ -89,6 +93,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try { await storage.expireReservations(); next(); }
     catch { res.status(503).json({ error: 'Reservation storage unavailable' }); }
   });
+  installDataRoutes(app);
   const workflowFailure = (res: express.Response, error: unknown) => {
     res.status(error instanceof WorkflowError ? error.status : error instanceof z.ZodError ? 400 : 500).json({ error: error instanceof WorkflowError ? error.message : error instanceof z.ZodError ? 'Invalid reservation details' : 'Reservation service unavailable' });
   };
@@ -149,21 +154,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...req.body,
         donorId: userId(res),
         expiryDate: req.body.expiryDate ? new Date(req.body.expiryDate) : null,
+        weightKg: req.body.weightKg ? Number(req.body.weightKg) : null,
+        organizationId: req.body.organizationId || null,
         pickupTimeStart: req.body.pickupTimeStart ? new Date(req.body.pickupTimeStart) : null,
         pickupTimeEnd: req.body.pickupTimeEnd ? new Date(req.body.pickupTimeEnd) : null,
         latitude: parseFloat(req.body.latitude),
         longitude: parseFloat(req.body.longitude),
-        freshnessScore: parseInt(req.body.freshnessScore) || 85,
-        qualityScore: parseInt(req.body.qualityScore) || 85,
+        freshnessScore: 0,
+        qualityScore: 0,
         defectsDetected: req.body.defectsDetected ? JSON.parse(req.body.defectsDetected) : [],
-        aiAnalysis: req.body.aiAnalysis ? JSON.parse(req.body.aiAnalysis) : null,
+        aiAnalysis: null,
       };
 
       if (req.file) {
         data.imageUrl = `/uploads/${req.file.filename}`;
       }
 
-      const validated = insertFoodListingSchema.parse(data);
+      const validated = insertFoodListingSchema.extend({ title: z.string().trim().min(1).max(150), description: z.string().trim().min(1).max(2000), quantity: z.string().trim().min(1).max(100), category: z.enum(['produce', 'bakery', 'dairy', 'prepared', 'packaged', 'other']), location: z.string().trim().min(1).max(300), latitude: z.number().min(-90).max(90), longitude: z.number().min(-180).max(180), weightKg: z.number().positive().max(10000).nullable() }).parse(data);
+      if (validated.expiryDate && validated.expiryDate <= new Date()) return res.status(400).json({ error: 'Expiry must be in the future' });
+      if (validated.pickupTimeStart && validated.pickupTimeEnd && validated.pickupTimeEnd <= validated.pickupTimeStart) return res.status(400).json({ error: 'Pickup end must be after start' });
+      if (validated.organizationId) {
+        const organization = await storage.getOrganization(validated.organizationId);
+        if (!organization || organization.ownerId !== userId(res)) return res.status(403).json({ error: 'Select an organization you own' });
+      }
       const listing = await storage.createFoodListing(validated);
       res.status(201).json(listing);
     } catch (error: any) {
@@ -251,27 +264,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Organization not found" });
       }
 
-      // Get all ratings for this organization
-      const ratings = await storage.getRatingsForOrganization(req.params.id);
-      
-      // Get supplier details for each rating
-      const suppliersWithRatings = await Promise.all(
-        ratings.map(async (rating) => {
-          const user = await storage.getUser(rating.supplierId);
-          const listings = await storage.getListingsByDonor(rating.supplierId);
-          return {
-            ...rating,
-            supplierName: user?.username || "Unknown",
-            activeListings: listings.filter(l => l.status === "available").length,
-            totalListings: listings.length,
-          };
-        })
-      );
-
-      res.json({
-        ...org,
-        suppliers: suppliersWithRatings,
-      });
+      res.json({ ...org, suppliers: await supplierSummaries(org.id) });
     } catch (error) {
       console.error("Error fetching organization details:", error);
       res.status(500).json({ error: "Failed to fetch organization details" });
@@ -288,10 +281,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get('/api/food-listings/:id/readings', async (req, res) => {
+    try {
+      if (!await storage.getFoodListing(req.params.id)) return res.status(404).json({ error: 'Listing not found' });
+      const readings = await storage.getSensorDataForListing(req.params.id);
+      const latest = readings[0];
+      res.json({ readings, unit: 'celsius', source: 'donor_submitted_measurements', stale: !latest || Date.now() - new Date(latest.timestamp).getTime() > 15 * 60000 });
+    } catch { res.status(500).json({ error: 'Could not load readings' }); }
+  });
   // Create sensor data reading
   app.post("/api/sensor-data", requireUser, async (req, res) => {
     try {
-      const validated = insertSensorDataSchema.parse(req.body);
+      const validated = insertSensorDataSchema.extend({ temperature: z.number().min(-80).max(100), humidity: z.number().min(0).max(100) }).parse(req.body);
       const listing = await storage.getFoodListing(validated.listingId);
       if (!listing) return res.status(404).json({ error: 'Food listing not found' });
       if (listing.donorId !== userId(res)) return res.status(403).json({ error: 'Only the donor may submit readings' });
@@ -310,79 +311,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "No image file provided" });
       }
 
-      // Check if OpenAI is configured
-      let client: OpenAI;
-      try {
-        client = getOpenAIClient();
-      } catch (error: any) {
-        console.error("OpenAI not configured:", error.message);
-        return res.status(503).json({ 
-          error: "AI detection service is not available." 
-        });
-      }
-
-      // Read the uploaded image file and convert to base64
-      const imagePath = req.file.path;
-      const imageBuffer = await fs.readFile(imagePath);
-      const base64Image = imageBuffer.toString('base64');
-      const imageUrl = `data:${req.file.mimetype};base64,${base64Image}`;
-
-      // Use OpenAI Vision API to analyze the food
-      const response = await client.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: `Analyze this food image and provide detailed information in the following JSON format:
-{
-  "title": "concise food name (e.g., 'Fresh Organic Apples', 'Mixed Salad Greens')",
-  "category": "one of: produce, bakery, dairy, prepared, packaged, other",
-  "description": "detailed description including type, appearance, condition, estimated freshness, and any notable features (50-100 words)",
-  "quantity": "estimated quantity with unit (e.g., '5 lbs', '10 servings', '2 loaves')",
-  "freshnessScore": number between 60-100 based on visual appearance,
-  "defectsDetected": array of any visible defects like ["bruising", "discoloration", "wilting"] or empty array if none
-}
-
-Be specific and practical. Focus on helping donors accurately describe their surplus food.`
-              },
-              {
-                type: "image_url",
-                image_url: {
-                  url: imageUrl
-                }
-              }
-            ]
-          }
-        ],
-        max_tokens: 500,
-        temperature: 0.3,
-      });
-
-      const content = response.choices[0].message.content;
-      if (!content) {
-        return res.status(500).json({ error: "No response from AI" });
-      }
-
-      // Parse the JSON response
-      try {
-        const foodData = JSON.parse(content);
-        res.json(foodData);
-      } catch (parseError) {
-        console.error("Failed to parse AI response:", content);
-        res.status(500).json({ error: "Failed to parse AI response" });
-      }
+      const result = await inspectImage(await fs.readFile(req.file.path), req.file.mimetype);
+      res.json(result);
     } catch (error: any) {
-      console.error("Error in food detection:", error);
-      
-      if (error.status === 429) {
-        return res.status(503).json({ error: "AI service is busy. Please try again." });
-      }
-      
-      res.status(500).json({ error: "Failed to detect food" });
-    }
+      res.status(error.message === 'AI_NOT_CONFIGURED' ? 503 : 502).json({ error: error.message === 'AI_NOT_CONFIGURED' ? 'AI inspection unavailable; configure OPENAI_API_KEY or use manual observations' : 'AI provider returned an unavailable or invalid result' });
+    } finally { if (req.file) await fs.unlink(req.file.path).catch(() => {}); }
+  });
+  app.post('/api/food-listings/:id/inspect', requireUser, upload.single('image'), async (req, res) => {
+    try {
+      const listing = await storage.getFoodListing(req.params.id);
+      if (!listing) return res.status(404).json({ error: 'Listing not found' });
+      if (listing.donorId !== userId(res)) return res.status(403).json({ error: 'Only the donor may inspect this listing' });
+      if (!req.file) return res.status(400).json({ error: 'Upload an image' });
+      const result = await inspectImage(await fs.readFile(req.file.path), req.file.mimetype);
+      res.json(await storage.updateFoodListing(listing.id, { aiAnalysis: { source: 'openai', model: 'gpt-4o-mini', observedAt: new Date().toISOString(), notes: result.description, defects: result.defectsDetected, disclaimer: 'Visual model observation, not food safety certification' }, defectsDetected: result.defectsDetected }));
+    } catch (error: any) {
+      res.status(error.message === 'AI_NOT_CONFIGURED' ? 503 : 502).json({ error: error.message === 'AI_NOT_CONFIGURED' ? 'AI inspection unavailable; configure OPENAI_API_KEY or use manual observations' : 'AI provider returned an unavailable or invalid result' });
+    } finally { if (req.file) await fs.unlink(req.file.path).catch(() => {}); }
   });
 
   // AI Chat Assistant Route

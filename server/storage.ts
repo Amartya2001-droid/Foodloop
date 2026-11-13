@@ -26,6 +26,7 @@ export interface IStorage {
   getClaimsForListing(listingId: string): Promise<Claim[]>;
   createClaim(claim: InsertClaim): Promise<Claim>;
   
+  getAllClaims(): Promise<Claim[]>;
   getReservation(id: string): Promise<Claim | undefined>;
   getReservationsForUser(userId: string): Promise<Claim[]>;
   reserveListing(input: ReserveInput): Promise<Claim>;
@@ -97,6 +98,7 @@ export class MemStorage implements IStorage {
     const listing: FoodListing = {
       ...insertListing,
       cost: insertListing.cost ?? null,
+      weightKg: insertListing.weightKg ?? null, organizationId: insertListing.organizationId ?? null,
       imageUrl: insertListing.imageUrl ?? null,
       defectsDetected: insertListing.defectsDetected ?? null,
       expiryDate: insertListing.expiryDate ?? null,
@@ -162,6 +164,7 @@ export class MemStorage implements IStorage {
     return claim;
   }
 
+  async getAllClaims() { return [...this.claims.values()]; }
   async getReservation(id: string) { return this.claims.get(id); }
   async getReservationsForUser(userId: string) {
     return [...this.claims.values()].filter(claim => claim.claimerId === userId || this.foodListings.get(claim.listingId)?.donorId === userId);
@@ -201,6 +204,7 @@ export class MemStorage implements IStorage {
     const id = randomUUID();
     const org: Organization = {
       ...insertOrg,
+      ownerId: insertOrg.ownerId ?? null,
       imageUrl: insertOrg.imageUrl ?? null,
       website: insertOrg.website ?? null,
       verified: insertOrg.verified ?? false,
