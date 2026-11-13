@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, real, integer, jsonb, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, real, integer, jsonb, boolean, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -43,11 +43,16 @@ export const sensorData = pgTable("sensor_data", {
 export const claims = pgTable("claims", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   listingId: varchar("listing_id").notNull(),
+  claimerId: varchar("claimer_id").references(() => users.id),
+  pickupAt: timestamp("pickup_at"),
+  expiresAt: timestamp("expires_at"),
+  pickupNotes: text("pickup_notes"),
+  completedAt: timestamp("completed_at"),
   claimerName: text("claimer_name").notNull(),
   claimerContact: text("claimer_contact").notNull(),
   claimedAt: timestamp("claimed_at").notNull().default(sql`now()`),
   status: text("status").notNull().default("pending"),
-});
+}, table => [uniqueIndex("one_active_reservation_per_listing").on(table.listingId).where(sql`${table.status} in ('reserved', 'picked_up')`)]);
 
 export const organizations = pgTable("organizations", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

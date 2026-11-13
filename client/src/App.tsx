@@ -7,7 +7,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import HomePage from "@/pages/HomePage";
 import MapPage from "@/pages/MapPage";
 import ImpactPage from "@/pages/ImpactPage";
-import MonitorPage from "@/pages/MonitorPage";
+import MonitorPage from "@/pages/ReservationsPage";
 import OrganizationsPage from "@/pages/OrganizationsPage";
 import OrganizationDetailPage from "@/pages/OrganizationDetailPage";
 import NotFound from "@/pages/not-found";
