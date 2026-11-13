@@ -1,16 +1,30 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, real, integer, jsonb, boolean, uniqueIndex } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  varchar,
+  timestamp,
+  real,
+  integer,
+  jsonb,
+  boolean,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 export const users = pgTable("users", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
 });
 
 export const foodListings = pgTable("food_listings", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
   title: text("title").notNull(),
   description: text("description").notNull(),
   quantity: text("quantity").notNull(),
@@ -31,34 +45,56 @@ export const foodListings = pgTable("food_listings", {
   aiAnalysis: jsonb("ai_analysis"),
   status: text("status").notNull().default("available"),
   donorId: varchar("donor_id").notNull(),
-  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  createdAt: timestamp("created_at")
+    .notNull()
+    .default(sql`now()`),
 });
 
 export const sensorData = pgTable("sensor_data", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  source: text("source").notNull().default("unknown"),
+  recordedBy: varchar("recorded_by").references(() => users.id),
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
   listingId: varchar("listing_id").notNull(),
   temperature: real("temperature").notNull(),
   humidity: real("humidity").notNull(),
-  timestamp: timestamp("timestamp").notNull().default(sql`now()`),
+  timestamp: timestamp("timestamp")
+    .notNull()
+    .default(sql`now()`),
 });
 
-export const claims = pgTable("claims", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  listingId: varchar("listing_id").notNull(),
-  claimerId: varchar("claimer_id").references(() => users.id),
-  pickupAt: timestamp("pickup_at"),
-  expiresAt: timestamp("expires_at"),
-  pickupNotes: text("pickup_notes"),
-  completedAt: timestamp("completed_at"),
-  claimerName: text("claimer_name").notNull(),
-  claimerContact: text("claimer_contact").notNull(),
-  claimedAt: timestamp("claimed_at").notNull().default(sql`now()`),
-  status: text("status").notNull().default("pending"),
-}, table => [uniqueIndex("one_active_reservation_per_listing").on(table.listingId).where(sql`${table.status} in ('reserved', 'picked_up')`)]);
+export const claims = pgTable(
+  "claims",
+  {
+    id: varchar("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    listingId: varchar("listing_id").notNull(),
+    claimerId: varchar("claimer_id").references(() => users.id),
+    pickupAt: timestamp("pickup_at"),
+    expiresAt: timestamp("expires_at"),
+    pickupNotes: text("pickup_notes"),
+    completedAt: timestamp("completed_at"),
+    claimerName: text("claimer_name").notNull(),
+    claimerContact: text("claimer_contact").notNull(),
+    claimedAt: timestamp("claimed_at")
+      .notNull()
+      .default(sql`now()`),
+    status: text("status").notNull().default("pending"),
+  },
+  (table) => [
+    uniqueIndex("one_active_reservation_per_listing")
+      .on(table.listingId)
+      .where(sql`${table.status} in ('reserved', 'picked_up')`),
+  ],
+);
 
 export const organizations = pgTable("organizations", {
   ownerId: varchar("owner_id").references(() => users.id),
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
   type: text("type").notNull(),
   description: text("description").notNull(),
@@ -70,22 +106,36 @@ export const organizations = pgTable("organizations", {
   website: text("website"),
   imageUrl: text("image_url"),
   verified: boolean("verified").notNull().default(false),
-  createdAt: timestamp("created_at").notNull().default(sql`now()`),
+  createdAt: timestamp("created_at")
+    .notNull()
+    .default(sql`now()`),
 });
 
 export const supplierRatings = pgTable("supplier_ratings", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  supplierId: varchar("supplier_id").notNull().references(() => users.id),
-  organizationId: varchar("organization_id").notNull().references(() => organizations.id),
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
+  supplierId: varchar("supplier_id")
+    .notNull()
+    .references(() => users.id),
+  organizationId: varchar("organization_id")
+    .notNull()
+    .references(() => organizations.id),
   overallRating: real("overall_rating").notNull(),
   googleReviewScore: real("google_review_score"),
-  foodSafetyCertified: boolean("food_safety_certified").notNull().default(false),
+  foodSafetyCertified: boolean("food_safety_certified")
+    .notNull()
+    .default(false),
   reliabilityScore: real("reliability_score").notNull(),
   qualityScore: real("quality_score").notNull(),
   totalDonations: integer("total_donations").notNull().default(0),
   aiAnalysis: jsonb("ai_analysis"),
-  createdAt: timestamp("created_at").notNull().default(sql`now()`),
-  updatedAt: timestamp("updated_at").notNull().default(sql`now()`),
+  createdAt: timestamp("created_at")
+    .notNull()
+    .default(sql`now()`),
+  updatedAt: timestamp("updated_at")
+    .notNull()
+    .default(sql`now()`),
 });
 
 export const insertUserSchema = createInsertSchema(users).pick({
@@ -115,7 +165,9 @@ export const insertOrganizationSchema = createInsertSchema(organizations).omit({
   createdAt: true,
 });
 
-export const insertSupplierRatingSchema = createInsertSchema(supplierRatings).omit({
+export const insertSupplierRatingSchema = createInsertSchema(
+  supplierRatings,
+).omit({
   id: true,
   createdAt: true,
   updatedAt: true,

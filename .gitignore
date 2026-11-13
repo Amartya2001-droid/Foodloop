@@ -6,3 +6,6 @@ work/
 !.env.example
 *.tsbuildinfo
 uploads/*
+
+playwright-report/
+test-results/
