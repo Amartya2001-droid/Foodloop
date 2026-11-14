@@ -9,6 +9,7 @@ import {
   jsonb,
   boolean,
   uniqueIndex,
+  check,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -110,6 +111,77 @@ export const organizations = pgTable("organizations", {
     .notNull()
     .default(sql`now()`),
 });
+
+export const organizationMemberships = pgTable(
+  "organization_memberships",
+  {
+    id: varchar("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    organizationId: varchar("organization_id")
+      .notNull()
+      .references(() => organizations.id),
+    userId: varchar("user_id")
+      .notNull()
+      .references(() => users.id),
+    role: text("role").notNull(),
+    status: text("status").notNull().default("invited"),
+    invitedBy: varchar("invited_by")
+      .notNull()
+      .references(() => users.id),
+    updatedAt: timestamp("updated_at")
+      .notNull()
+      .default(sql`now()`),
+  },
+  (table) => [
+    uniqueIndex("organization_member_unique").on(
+      table.organizationId,
+      table.userId,
+    ),
+    check(
+      "organization_membership_role",
+      sql`${table.role} in ('manager', 'member')`,
+    ),
+    check(
+      "organization_membership_status",
+      sql`${table.status} in ('invited', 'active', 'declined', 'removed')`,
+    ),
+  ],
+);
+export const organizationReviews = pgTable(
+  "organization_reviews",
+  {
+    id: varchar("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    organizationId: varchar("organization_id")
+      .notNull()
+      .references(() => organizations.id),
+    requestedBy: varchar("requested_by")
+      .notNull()
+      .references(() => users.id),
+    evidence: text("evidence").notNull(),
+    status: text("status").notNull().default("pending"),
+    requestedAt: timestamp("requested_at")
+      .notNull()
+      .default(sql`now()`),
+    reviewedBy: varchar("reviewed_by").references(() => users.id),
+    reviewedAt: timestamp("reviewed_at"),
+    note: text("note"),
+  },
+  (table) => [
+    uniqueIndex("one_pending_organization_review")
+      .on(table.organizationId)
+      .where(sql`${table.status} = 'pending'`),
+    check(
+      "organization_review_status",
+      sql`${table.status} in ('pending', 'approved', 'rejected', 'superseded')`,
+    ),
+  ],
+);
+export type OrganizationMembership =
+  typeof organizationMemberships.$inferSelect;
+export type OrganizationReview = typeof organizationReviews.$inferSelect;
 
 export const supplierRatings = pgTable("supplier_ratings", {
   id: varchar("id")

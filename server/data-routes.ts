@@ -1,3 +1,4 @@
+import { installOrganizationRoutes } from "./organization-routes";
 import type { Express, Response } from "express";
 import { z } from "zod";
 import { storage } from "./storage";
@@ -33,15 +34,14 @@ export async function supplierSummaries(organizationId?: string) {
   );
 }
 const fail = (res: Response, error: unknown) =>
-  res
-    .status(error instanceof z.ZodError ? 400 : 500)
-    .json({
-      error:
-        error instanceof z.ZodError
-          ? "Invalid details"
-          : "Data service unavailable",
-    });
+  res.status(error instanceof z.ZodError ? 400 : 500).json({
+    error:
+      error instanceof z.ZodError
+        ? "Invalid details"
+        : "Data service unavailable",
+  });
 export function installDataRoutes(app: Express) {
+  installOrganizationRoutes(app);
   app.get("/api/impact", async (_req, res) => {
     try {
       const listings = await storage.getAllFoodListings();

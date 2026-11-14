@@ -1,4 +1,14 @@
 import {
+  organizationRole,
+  applyOrganizationCommand,
+  type OrganizationCommand,
+  type OrganizationState,
+} from "./organization-policy";
+import type {
+  OrganizationMembership,
+  OrganizationReview,
+} from "@shared/schema";
+import {
   reserve,
   transition,
   WorkflowError,
@@ -70,6 +80,14 @@ export interface IStorage {
   getOrganization(id: string): Promise<Organization | undefined>;
   createOrganization(org: InsertOrganization): Promise<Organization>;
 
+  getOrganizationState(id: string): Promise<OrganizationState | undefined>;
+  getMembershipsForUser(userId: string): Promise<OrganizationMembership[]>;
+  organizationAction(
+    id: string,
+    actor: string,
+    command: OrganizationCommand,
+  ): Promise<OrganizationState>;
+
   // Supplier Ratings
   getRatingsForOrganization(organizationId: string): Promise<SupplierRating[]>;
   getRatingsForSupplier(supplierId: string): Promise<SupplierRating[]>;
@@ -83,6 +101,8 @@ export class MemStorage implements IStorage {
   private sensorData: Map<string, SensorData>;
   private claims: Map<string, Claim>;
   private organizations: Map<string, Organization>;
+  private memberships = new Map<string, OrganizationMembership>();
+  private reviews = new Map<string, OrganizationReview>();
   private supplierRatings: Map<string, SupplierRating>;
 
   constructor() {
@@ -136,6 +156,23 @@ export class MemStorage implements IStorage {
   async createFoodListing(
     insertListing: InsertFoodListing,
   ): Promise<FoodListing> {
+    if (insertListing.organizationId) {
+      const organization = this.organizations.get(insertListing.organizationId);
+      if (
+        !organization ||
+        !organizationRole(
+          {
+            organization,
+            memberships: [...this.memberships.values()].filter(
+              (row) => row.organizationId === organization.id,
+            ),
+            reviews: [],
+          },
+          insertListing.donorId,
+        )
+      )
+        throw new WorkflowError(403, "Active organization membership required");
+    }
     const id = randomUUID();
     const listing: FoodListing = {
       ...insertListing,
@@ -296,6 +333,52 @@ export class MemStorage implements IStorage {
     };
     this.organizations.set(id, org);
     return org;
+  }
+
+  async getOrganizationState(id: string) {
+    const organization = this.organizations.get(id);
+    return organization
+      ? {
+          organization,
+          memberships: [...this.memberships.values()].filter(
+            (row) => row.organizationId === id,
+          ),
+          reviews: [...this.reviews.values()].filter(
+            (row) => row.organizationId === id,
+          ),
+        }
+      : undefined;
+  }
+  async getMembershipsForUser(userId: string) {
+    return [...this.memberships.values()].filter(
+      (row) => row.userId === userId,
+    );
+  }
+  async organizationAction(
+    id: string,
+    actor: string,
+    command: OrganizationCommand,
+  ) {
+    // Read, policy decision and writes do not yield, so revocation/action ordering is atomic.
+    const organization = this.organizations.get(id);
+    if (!organization) throw new WorkflowError(404, "Organization not found");
+    const state = applyOrganizationCommand(
+      {
+        organization,
+        memberships: [...this.memberships.values()].filter(
+          (row) => row.organizationId === id,
+        ),
+        reviews: [...this.reviews.values()].filter(
+          (row) => row.organizationId === id,
+        ),
+      },
+      actor,
+      command,
+    );
+    this.organizations.set(id, state.organization);
+    for (const row of state.memberships) this.memberships.set(row.id, row);
+    for (const row of state.reviews) this.reviews.set(row.id, row);
+    return state;
   }
 
   async getRatingsForOrganization(

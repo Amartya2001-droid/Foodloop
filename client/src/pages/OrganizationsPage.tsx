@@ -1,3 +1,6 @@
+import OrganizationPermissions, {
+  OrganizationAccountPanel,
+} from "@/components/OrganizationPermissions";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "wouter";
@@ -9,7 +12,13 @@ import type { Organization } from "@shared/schema";
 import type { Supplier } from "./ImpactPage";
 export function OrganizationDetailPage() {
   const { id } = useParams();
-  const organization = useQuery<Organization & { suppliers: Supplier[] }>({
+  const organization = useQuery<
+    Organization & {
+      suppliers: Supplier[];
+      verificationStatus: string;
+      reviewedAt: string | null;
+    }
+  >({
     queryKey: [`/api/organizations/${id}`],
   });
   if (organization.isLoading)
@@ -26,16 +35,27 @@ export function OrganizationDetailPage() {
       <Link href="/organizations">← Organizations</Link>
       <h1 className="text-4xl font-semibold">{item.name}</h1>
       <p className="text-sm text-muted-foreground">
-        Community-submitted profile · Not independently verified
+        Community-submitted profile ·{" "}
+        {item.verified
+          ? "Reviewed by an app-designated independent reviewer"
+          : item.verificationStatus === "pending"
+            ? "Review pending"
+            : "Not independently verified"}
       </p>
       <p>{item.description}</p>
       <p>{item.location}</p>
       <p>
         {item.contactEmail} · {item.contactPhone}
       </p>
+      <OrganizationPermissions
+        id={item.id}
+        name={item.name}
+        description={item.description}
+      />
       <h2 className="text-2xl font-semibold pt-5">Donation activity</h2>
       <p>
-        Donations explicitly associated with this organization by its owner.
+        Donations explicitly associated by the owner or active members. Profile
+        review is not food-safety certification.
       </p>
       {!item.suppliers.length && <p>No donation activity yet.</p>}
       {item.suppliers.map((supplier) => (
@@ -66,12 +86,14 @@ export default function OrganizationsPage() {
         <div>
           <h1 className="text-4xl font-semibold">Community organizations</h1>
           <p className="text-muted-foreground mt-4">
-            User-created profiles. No certification or third-party verification
-            is claimed.
+            User-created profiles. Only recorded independent app reviews are
+            labeled reviewed; no regulatory or food-safety certification is
+            claimed.
           </p>
         </div>
         <Button onClick={() => setShowForm(!showForm)}>Add organization</Button>
       </div>
+      <OrganizationAccountPanel />
       {showForm && (
         <form
           className="border rounded-2xl p-6 grid sm:grid-cols-2 gap-4"
