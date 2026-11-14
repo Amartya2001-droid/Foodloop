@@ -1,28 +1,12 @@
-# FoodLoop AI
+# FoodLoop
 
-Food redistribution hackathon prototype built with React, Vite, Express, TypeScript and Drizzle. Day 1 audit for the Nov 11, 2026 brief, performed Nov 10, 2026. This repository contains application code, not just a proposal.
+A community food exchange built with React, TypeScript, Vite, Express and Drizzle. People can create an account, post surplus food, reserve a pickup, record measurements and confirm a handoff. The app starts empty: every displayed donation, organization, observation and pickup comes from application state.
 
-**Live status: not live yet — blocked by deployment configuration, a provisioned database, and production security work.** No working public deployment has been verified. The previous README's `https://foodloop.replit.app` was labelled a demo and is not an established live URL.
-
-## Reservations and pickup (feature PR)
-
-Signed-in recipients reserve available food with an arranged pickup time, private contact details and notes. The donor cannot reserve their own listing. A reservation expires two hours after the arranged pickup (or at food expiry, if earlier). Expiry is reconciled on API requests; it releases still-edible food and retains history. Either participant can cancel before pickup. The recipient marks pickup, then the donor confirms completion. Invalid transitions and concurrent reservations return conflicts. The monitor page shows both sides' reservation activity and donor listings, with actions based on identity.
-
-Lifecycle status cannot be changed through the generic PATCH endpoint. Listings with reservation history cannot be deleted. Memory operations run atomically within one process; the PostgreSQL adapter uses transactions and row locks, with a partial unique index as a second guard. The added claim columns/index are declared in Drizzle and in `migrations/0001_reservation_workflow.sql` for review against an existing database. Do not run both manual SQL and schema push blindly. No real database has been connected or migrated; `DATABASE_URL` is needed for that later validation. Local memory mode needs no schema setup or secrets.
-
-Tests cover simultaneous claims, privacy, actor permissions, cancellation/re-reservation, expiry, invalid transitions, and one-time confirmed completion. This supersedes the historical reservation gaps below. PRs are stacked: reservation depends on authentication.
-
-## Working authentication (feature PR)
-
-Registration, login, current-account lookup and logout now work in local memory mode. Passwords use salted scrypt hashes; opaque random session tokens are stored as hashes in a bounded, expiring server-side session map and delivered in HttpOnly, SameSite=Strict cookies. Sessions last 12 hours and reset on server restart, including in database mode. Credentials require 12–128 characters. There is no email verification, password recovery or multi-instance session persistence yet.
-
-Create an account using the account bar. Posting derives donor ownership from the session. Only the donor can edit/delete their listings or submit sensor readings; `/api/my-listings` uses the signed-in donor. Anonymous users may browse. AI endpoints require sign-in. Cross-origin browser mutations are rejected and sign-in attempts are rate limited per process. Account data and session tokens are excluded from response logs. For HTTPS hosting set `COOKIE_SECURE=true`; no secret is required for local opaque sessions. Run behind a same-origin HTTPS proxy before exposing externally.
-
-The sections below describing missing auth are the historical Day 1 audit; this section supersedes those auth findings. Reservation and display gaps remain until their separate feature PRs. DB-VERIFICATION.md records the pre-feature Day 2 snapshot.
+**Live status: not live yet — blocked by Amartya's deployment configuration and production persistence decisions.** No working public deployment has been verified. The old `foodloop.replit.app` address is not an established live URL. A hosted database is not required to run the complete local workflow.
 
 ## Run locally
 
-Use Node.js 22 and npm. No credentials are needed for the explicitly selected, empty in-memory mode:
+Use Node 22 and npm:
 
 ```sh
 npm ci
@@ -30,41 +14,70 @@ npm run check
 npm run build
 npm test
 STORAGE_MODE=memory npm run dev
-# Or run the built app:
+# Or, after building:
 STORAGE_MODE=memory npm start
 ```
 
-Open http://localhost:5000 (override with `PORT`). Memory mode reuses the existing MemStorage implementation; data disappears on restart and no organizations or demo accounts are seeded. It is for local checks only. Omitting `STORAGE_MODE` retains database storage and requires `DATABASE_URL`; there is no silent fallback. Unknown storage modes fail at startup.
+Open http://localhost:5000 (`PORT` overrides it). No key, seeded account or hosted database is required. Register two accounts in separate browser profiles: one donor and one recipient. Passwords need 12–128 characters. Memory mode keeps accounts/listings/readings/reservations in one process and resets them on restart. Uploaded listing photos use the local `uploads/` directory and are not a persistent production asset store.
 
-For database-backed operation, provision a compatible Neon PostgreSQL database and supply its real `DATABASE_URL` through your environment, then run `npm run db:push`. The driver uses Neon's WebSocket transport; an ordinary local PostgreSQL URL alone is insufficient. No database was provisioned or connected during this audit. `server/seed.ts` is a destructive demo reset script with fabricated organization/rating data and plaintext demo passwords; do not use it on production data. The runtime does not automatically load `.env` files. Do not commit secrets.
+Try the flow:
 
-`OPENAI_API_KEY` is optional for startup; without it the chat and image-detection endpoints return 503. Successful external AI calls have not been verified. No session secret is currently consumed by authentication middleware.
+1. Create an optional organization profile, then post food with its address and coordinates. Weight and pickup/expiry times are optional; provided dates and values are validated.
+2. Open the listing's details to record actual temperature/humidity and a quality observation.
+3. As another account, reserve a future pickup time and provide private contact details and notes.
+4. In **Pickups**, the recipient marks food picked up; the donor confirms completion.
+5. **Impact** now shows the confirmed pickup and its donor-reported weight. **Organizations** and supplier summaries show recorded donation activity.
 
-## What exists and what was verified
+## What works and where data comes from
 
-- Production bundle builds and TypeScript checks pass after fixing nullable pickup dates on the homepage.
-- Smoke tests start both development and built production servers without credentials, serve the app shell, and exercise in-memory listing creation, status update, deletion and unavailable-AI handling.
-- Listing APIs support browsing, multipart creation with optional images, status updates and deletion. Organization/detail and sensor read/write routes have storage implementations. Database-backed behavior remains unverified here.
-- React pages exist for home, map, impact, monitoring, organizations and organization details. Serving the HTML shell is tested; full browser interactions are not covered by the smoke suite.
-- CI runs clean installation, type checking, build and smoke tests on pull requests and pushes to main. This is initial smoke coverage, not comprehensive coverage.
+| Flow | Source and honest limits |
+| --- | --- |
+| Accounts | Salted scrypt password hashes; random opaque sessions stored as hashes; HttpOnly SameSite=Strict cookies; 12-hour expiry, login throttling and cross-origin browser mutation rejection. No recovery/email verification or multi-instance session store. Sessions reset on restart in every storage mode. |
+| Authorization | Ownership comes from the session, not form input. Only donors can mutate their food or submit readings/quality reports. Reservation details are restricted to donor/recipient. Organizations are owned by their creator and cannot self-verify. Shared memberships and independent verification are not implemented. |
+| Reservations | Atomic availability check and claim creation; future pickup within the donor's window and before expiry; cancellation before pickup; recipient pickup then donor confirmation. Generic PATCH cannot change lifecycle status. Reservation history cannot be deleted. |
+| Expiry | Reserved food is released two hours after arranged pickup, or at food expiry if earlier. Expiry reconciles on API requests, not a background scheduler. Expired food is excluded from available listings. |
+| Sensors | Actual donor-submitted temperature (°C) and humidity (%) with server timestamps. Empty, failed and stale (>15 minutes) states are shown. Hardware/device ingestion is **not yet wired**; no simulated live readings. |
+| Quality | Owner-entered observations with provenance/time, or an optional validated AI visual observation. No fabricated scores, confidence, shelf life, certification or default “85% fresh” display. An observation is not food-safety certification. |
+| Impact | Confirmed pickup count, active reservations, donors with completed pickups and donor-reported listing weight for completed pickups. Weight coverage is shown; meals and CO₂ are **not measured** and are not estimated. Seven-day counts use UTC dates. |
+| Suppliers | Actual posted/available donation counts and confirmed pickups. No staged AI scoring, seeded ratings, Google reviews or certification claims. Old supplier rating rows are not used as verified evidence. |
+| Organizations | User-created contact/location profiles and owner-associated donation activity. Every profile is labeled community-submitted and not independently verified. |
+| Locations | User-entered coordinates link to OpenStreetMap. The old marker grid is removed; an embedded geographic map is **not yet wired**. `/map` remains a compatible alias to food browsing. |
 
-## Stubbed or misleading in the prototype
+Legacy fabricated displays/examples were removed from active product code. `server/seed.ts` refuses automatic seeding rather than deleting data and inserting demo passwords/metrics. Isolated test fixtures remain clearly synthetic. The optional AI chat endpoint remains implemented; the main UI focuses on the donation workflow.
 
-- MapView draws a grid of markers, not a geographical map; coordinates and center do not position markers. Some locations are hardcoded.
-- Sensor and quality displays include mock readings/results. Impact figures are hardcoded or derived using arbitrary listing-count multipliers, not measured outcomes.
-- Supplier analysis displays stored demo ratings with staged animation; there is no Google reviews/certification verification pipeline.
-- The claim button changes listing status only. Claims storage exists, but there is no claim-creation API, identity-bound reservation or pickup workflow.
-- Posting uses a hardcoded `demo-user`; monitoring uses `hope_food_bank`. There are no implemented login, registration, logout or session routes despite earlier documentation.
-- UI badges such as verified, AI certified and carbon neutral are prototype copy, not established certifications or metrics. Historical INSTRUCTIONS.md and replit.md also describe aspirational behavior; this README takes precedence for verified status.
+## Storage and services
 
-## Missing for a working redistribution product
+Features call `IStorage` in `server/storage.ts`. `STORAGE_MODE=memory` selects ephemeral maps. Omitting it, or choosing `database`, uses the existing PostgreSQL adapter and requires a real **`DATABASE_URL`**. Unknown modes fail rather than silently falling back. The current Neon driver uses WebSocket transport; an ordinary local PostgreSQL URL is not a supported substitute by itself.
 
-Authenticated users, password hashing and authorization; validated claim/reservation transitions and concurrent-claim protection; identity-bound donor ownership; verified partner onboarding; pickup coordination/completion; trustworthy impact measurement; real mapping and sensor integration; production database/schema management, persistent uploads, monitoring and deployment. Current unauthenticated mutation endpoints must not be exposed as a production service. Food-image model output is not food-safety certification. Chat has a process-local rate limiter; image detection does not share that protection.
+The PostgreSQL adapter implements the same workflows with transactions/row locks and an active-reservation unique index. Drizzle declares added reservation, organization ownership and listing-weight fields. Review `migrations/0001_reservation_workflow.sql` and `0002_real_data_flows.sql` for an existing database, or review a schema push against an approved fresh database. Do not run both blindly. **No hosted database was provisioned, connected or migrated, and database runtime parity remains unverified.** Provisioning and deployment are Amartya's decisions.
 
-No open issues or PRs existed at the initial audit. Day 1 changes are limited to repository rules, CI, smoke coverage, local startup and the existing type-check blocker. Further product work belongs to later days.
+Exact configuration needs:
 
-## Repository and reporting
+- `DATABASE_URL`: required only for approved database-backed operation; not needed locally in memory mode.
+- `OPENAI_API_KEY`: optional, required only for real external AI photo inspection/chat. Without it photo inspection returns 503 and manual observations remain usable. No successful external call has been claimed.
+- `OPENAI_BASE_URL`: optional server-controlled endpoint override for a compatible provider or local test stub; omit for OpenAI. Never accepted from browser input.
+- `COOKIE_SECURE=true`: deployment setting for HTTPS cookies; configure a same-origin HTTPS proxy. No session signing secret is needed for opaque server-held sessions.
+- `PORT`: optional; defaults to 5000.
 
-See [AGENTS.md](AGENTS.md) for mandatory branch, PR, testing and daily reporting rules. Reports: [10-day agent program — daily log](https://github.com/Amartya2001-droid/Foodloop/issues/1).
+No keys belong in source, issue comments or PR bodies. The runtime does not automatically load `.env` files.
 
-The declared package licence is MIT; see [LICENSE](LICENSE). A Day 2 search of tracked text found no contradictory licence header or notice. This is not an audit of third-party dependencies or image provenance. See [DB-VERIFICATION.md](DB-VERIFICATION.md) for the memory-only schema and workflow verification, limitations, and follow-up triage.
+## Tests
+
+`npm run check`, `npm run build` and `npm test` cover the API in development/production memory mode, account/ownership controls, reservation races/transitions/expiry, organization association, sensor validation/provenance, manual observations and confirmed impact. AI integration is tested against a loopback stub with a generated ephemeral test token, including invalid-provider-output rejection; it never uses a real key/service.
+
+The Playwright test uses two isolated browser accounts to post food, record measurements/observations, reserve, collect and confirm, inspect impact and check mobile overflow:
+
+```sh
+npx playwright install chromium
+npm run test:browser
+# If a system Chromium is already installed:
+PLAYWRIGHT_CHROMIUM_EXECUTABLE=/usr/bin/chromium npm run test:browser
+```
+
+CI on Node 22 runs type checking, build, API tests and Chromium browser coverage. Build warnings for outdated Browserslist data and PostCSS remain. Coverage is not exhaustive: explicit session-expiry integration coverage, generalized organization memberships, production session persistence, database runtime tests, independent food verification, hardware telemetry and deployment hardening remain follow-ups.
+
+## Licence and program log
+
+[MIT LICENSE](LICENSE) matches the package declaration. No contradictory tracked-text licence notice was found in Day 2; third-party licences and binary asset provenance were not audited. Historical [DB-VERIFICATION.md](DB-VERIFICATION.md), `INSTRUCTIONS.md` and `replit.md` describe older snapshots or aspirations, not current feature guarantees. This README is the current status.
+
+See [AGENTS.md](AGENTS.md) for branch, PR, test and reporting rules. Daily reports: [issue #1](https://github.com/Amartya2001-droid/Foodloop/issues/1).

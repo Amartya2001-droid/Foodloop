@@ -1,404 +1,198 @@
-import ReservationForm from "@/components/ReservationForm";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { queryClient } from "@/lib/queryClient";
-import { getFoodListings, updateFoodListing } from "@/lib/api";
-import HeroSection from "@/components/HeroSection";
-import FoodListingCard from "@/components/FoodListingCard";
-import MapView from "@/components/MapView";
-import ImpactDashboard from "@/components/ImpactDashboard";
-import SensorMonitorPanel from "@/components/SensorMonitorPanel";
-import QualityInspectionResult from "@/components/QualityInspectionResult";
-import PostFoodForm from "@/components/PostFoodForm";
-import AIAssistantChat from "@/components/AIAssistantChat";
-import ThemeToggle from "@/components/ThemeToggle";
+import { Link } from "wouter";
+import { ArrowUpRight, Leaf, MapPin, Package, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Input } from "@/components/ui/input";
-import { Search, Bell, Menu, MessageCircle, Loader2 } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
-import inspectionImage from '@assets/generated_images/AI_food_quality_inspection_2d05afb7.png';
-import foodLoopLogo from '@assets/PHOTO-2025-11-08-14-22-08_1762633632382.jpg';
-import { Link } from "wouter";
-
+import PostFoodForm from "@/components/PostFoodForm";
+import ReservationForm from "@/components/ReservationForm";
+import { queryClient } from "@/lib/queryClient";
+import type { FoodListing } from "@shared/schema";
 export default function HomePage() {
-  const { toast } = useToast();
-  const [showPostForm, setShowPostForm] = useState(false);
-  const [showChat, setShowChat] = useState(false);
-  const [showMobileMenu, setShowMobileMenu] = useState(false);
-
-  const { data: foodListings, isLoading } = useQuery({
+  const [posting, setPosting] = useState(false),
+    [selected, setSelected] = useState<string | null>(null),
+    [search, setSearch] = useState("");
+  const listings = useQuery<FoodListing[]>({
     queryKey: ["/api/food-listings"],
-    queryFn: getFoodListings,
+    refetchInterval: 30000,
   });
-
-  const [reservationId, setReservationId] = useState<string | null>(null);
-  const handleClaimFood = (id: string) => setReservationId(id);
-
-  const formatPickupTime = (start: Date | null, end: Date | null) => {
-    if (!start || !end) return "Pickup time not specified";
-    const options: Intl.DateTimeFormatOptions = { 
-      month: 'short', 
-      day: 'numeric', 
-      hour: 'numeric', 
-      minute: '2-digit' 
-    };
-    return `${new Date(start).toLocaleDateString('en-US', options)} - ${new Date(end).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
-  };
-
-  const mapLocations = [
-    { id: "1", name: "Hope Food Bank - Downtown Halifax", type: "food_bank" as const, latitude: 44.6488, longitude: -63.5752 },
-    { id: "2", name: "Community Fridge - North End", type: "community_fridge" as const, latitude: 44.6650, longitude: -63.5820 },
-    ...(foodListings || []).map(listing => ({
-      id: listing.id,
-      name: listing.title,
-      type: "food_listing" as const,
-      latitude: listing.latitude,
-      longitude: listing.longitude,
-      freshnessScore: listing.freshnessScore,
-    })),
-  ];
-
-  const mockSensorReadings = [
-    { temperature: 38, humidity: 65, lastUpdate: "2 min ago", status: "normal" as const },
-  ];
-
-  const mockQualityResult = {
-    defects: 0,
-    colorChange: "low" as const,
-    bruising: "none" as const,
-    packaging: "good" as const,
-    shelfLifeDays: 5,
-    confidence: 96,
-  };
-
-  const impactStats = {
-    mealsProvided: (foodListings?.length || 0) * 15,
-    poundsSaved: (foodListings?.length || 0) * 25,
-    co2Prevented: (foodListings?.length || 0) * 10,
-    itemsRescued: foodListings?.length || 0,
-  };
-
+  const account = useQuery<{ user: { id: string } | null }>({
+    queryKey: ["/api/auth/me"],
+  });
+  const filtered = listings.data?.filter((item) =>
+    `${item.title} ${item.description} ${item.location} ${item.category}`
+      .toLowerCase()
+      .includes(search.toLowerCase()),
+  );
   return (
-    <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-8">
-              <div className="flex items-center gap-2">
-                <img src={foodLoopLogo} alt="FoodLoop AI" className="h-10 w-10 rounded-md" />
-                <span className="font-bold text-xl">FoodLoop AI</span>
-              </div>
-              
-              <nav className="hidden md:flex items-center gap-6">
-                <Link href="/map" className="text-sm font-medium hover:text-primary">Find Food</Link>
-                <button onClick={() => setShowPostForm(true)} className="text-sm font-medium hover:text-primary">Post Food</button>
-                <Link href="/monitor" className="text-sm font-medium hover:text-primary">Monitor</Link>
-                <Link href="/impact" className="text-sm font-medium hover:text-primary">Impact</Link>
-              </nav>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <div className="hidden md:flex items-center gap-2">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search food..."
-                    className="pl-9 w-64"
-                    data-testid="input-search"
-                  />
-                </div>
-                <Button variant="ghost" size="icon" data-testid="button-notifications">
-                  <Badge className="absolute -top-1 -right-1 h-5 w-5 rounded-full p-0 flex items-center justify-center text-xs bg-destructive">
-                    3
-                  </Badge>
-                  <Bell className="h-5 w-5" />
-                </Button>
-              </div>
-              
-              <ThemeToggle />
-              
-              <Button
-                variant="ghost"
-                size="icon"
-                className="md:hidden"
-                onClick={() => setShowMobileMenu(true)}
-                data-testid="button-mobile-menu"
-              >
-                <Menu className="h-5 w-5" />
-              </Button>
-            </div>
+    <main className="max-w-7xl mx-auto px-5 py-10 space-y-10">
+      <section className="rounded-3xl bg-emerald-950 text-emerald-50 p-8 md:p-14 grid md:grid-cols-[2fr_1fr] gap-10 items-center">
+        <div>
+          <p className="uppercase tracking-widest text-xs text-emerald-300 mb-5">
+            Community food exchange
+          </p>
+          <h1 className="text-4xl md:text-6xl font-semibold tracking-tight max-w-2xl">
+            Good food.
+            <br />A better next stop.
+          </h1>
+          <p className="text-emerald-100/80 mt-6 max-w-lg text-lg">
+            Share surplus food, arrange a pickup, and make every donation count.
+          </p>
+          <Button
+            className="mt-7 bg-emerald-300 text-emerald-950 hover:bg-emerald-200"
+            size="lg"
+            onClick={() => setPosting(true)}
+          >
+            Post surplus food <ArrowUpRight className="ml-2 h-4 w-4" />
+          </Button>
+        </div>
+        <div className="rounded-2xl border border-emerald-700 p-6 space-y-5">
+          <Leaf className="h-10 w-10 text-emerald-300" />
+          <h2 className="text-xl font-medium">From offer to pickup</h2>
+          <ol className="space-y-3 text-emerald-100/80 text-sm">
+            <li>1. Post what you have and where to collect it.</li>
+            <li>2. A neighbor reserves a pickup time.</li>
+            <li>3. Both sides confirm the handoff.</li>
+          </ol>
+          <Link href="/impact" className="text-emerald-300 inline-block">
+            View recorded impact →
+          </Link>
+        </div>
+      </section>
+      <section aria-labelledby="available-heading" className="space-y-6">
+        <div className="flex flex-wrap justify-between gap-4 items-end">
+          <div>
+            <p className="text-sm text-emerald-700 font-medium">
+              Find your next pickup
+            </p>
+            <h2 id="available-heading" className="text-3xl font-semibold mt-1">
+              Available food
+            </h2>
+          </div>
+          <div className="relative">
+            <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+            <Input
+              aria-label="Search food"
+              placeholder="Search food or location"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              className="pl-9 w-72"
+            />
           </div>
         </div>
-      </header>
-
-      <main>
-        <HeroSection
-          onPostFood={() => setShowPostForm(true)}
-          onFindFood={() => window.location.href = '/map'}
-        />
-
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 space-y-12">
-          <section id="food-listings">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="text-3xl font-bold mb-2">Available Food</h2>
-                <p className="text-muted-foreground">Fresh surplus food in your area</p>
-              </div>
-              <Button onClick={() => setShowPostForm(true)} data-testid="button-post-food">
-                <span className="material-icons text-sm mr-2">add_circle</span>
-                Post Food
-              </Button>
-            </div>
-
-            <Tabs defaultValue="list" className="mb-6">
-              <TabsList>
-                <TabsTrigger value="list" data-testid="tab-list-view">
-                  <span className="material-icons text-sm mr-2">view_list</span>
-                  List View
-                </TabsTrigger>
-                <TabsTrigger value="map" data-testid="tab-map-view">
-                  <span className="material-icons text-sm mr-2">map</span>
-                  Map View
-                </TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="list" className="mt-6">
-                {isLoading ? (
-                  <div className="flex items-center justify-center py-12">
-                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                  </div>
-                ) : foodListings && foodListings.length > 0 ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {foodListings.map((listing) => (
-                      <FoodListingCard
-                        key={listing.id}
-                        id={listing.id}
-                        title={listing.title}
-                        quantity={listing.quantity}
-                        imageUrl={listing.imageUrl || undefined}
-                        location={listing.location}
-                        pickupTime={formatPickupTime(listing.pickupTimeStart, listing.pickupTimeEnd)}
-                        freshnessScore={listing.freshnessScore}
-                        defects={listing.defectsDetected || []}
-                        onClaim={handleClaimFood}
-                      />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-12">
-                    <span className="material-icons text-6xl text-muted-foreground mb-4">restaurant</span>
-                    <p className="text-xl text-muted-foreground mb-4">No food listings yet</p>
-                    <Button onClick={() => setShowPostForm(true)}>
-                      <span className="material-icons text-sm mr-2">add_circle</span>
-                      Post the first listing
+        {listings.isLoading && <p>Loading food…</p>}
+        {listings.error && (
+          <p role="alert">
+            Could not load food.{" "}
+            <button onClick={() => listings.refetch()} className="underline">
+              Retry
+            </button>
+          </p>
+        )}
+        {!listings.isLoading && !listings.error && !filtered?.length && (
+          <div className="border border-dashed rounded-2xl p-12 text-center">
+            <Package className="mx-auto mb-3 text-emerald-700" />
+            <h3 className="text-xl font-medium">
+              {search ? "No matches yet" : "A fresh start"}
+            </h3>
+            <p className="text-muted-foreground mt-2">
+              {search
+                ? "Try another food or location."
+                : "No available donations. Post the first offer to get things moving."}
+            </p>
+          </div>
+        )}
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          {filtered?.map((item) => (
+            <article
+              key={item.id}
+              className="border rounded-2xl overflow-hidden bg-card flex flex-col"
+            >
+              {item.imageUrl ? (
+                <img
+                  src={item.imageUrl}
+                  alt={item.title}
+                  className="h-44 w-full object-cover"
+                />
+              ) : (
+                <div className="h-36 bg-emerald-50 dark:bg-emerald-950 flex items-center justify-center">
+                  <Leaf className="h-12 w-12 text-emerald-700" />
+                </div>
+              )}
+              <div className="p-5 space-y-3 flex-1 flex flex-col">
+                <p className="text-xs uppercase tracking-wider text-emerald-700">
+                  {item.category} · {item.cost || "Free"}
+                </p>
+                <h3 className="text-xl font-semibold">{item.title}</h3>
+                <p className="text-muted-foreground">{item.quantity}</p>
+                <p className="text-sm line-clamp-2">{item.description}</p>
+                <p className="text-sm flex gap-2">
+                  <MapPin className="w-4 h-4 shrink-0" />
+                  {item.location}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {item.expiryDate
+                    ? `Expires ${new Date(item.expiryDate).toLocaleString()}`
+                    : "Ask the donor about food expiry"}
+                </p>
+                <div className="flex gap-3 items-center pt-3 mt-auto">
+                  <Link
+                    href={`/listings/${item.id}`}
+                    className="text-sm underline"
+                  >
+                    Details & measurements
+                  </Link>
+                  {item.donorId !== account.data?.user?.id && (
+                    <Button
+                      className="ml-auto"
+                      onClick={() => setSelected(item.id)}
+                    >
+                      Reserve
                     </Button>
-                  </div>
-                )}
-              </TabsContent>
-
-              <TabsContent value="map" className="mt-6">
-                <MapView locations={mapLocations} />
-              </TabsContent>
-            </Tabs>
-          </section>
-
-          <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2">
-              <ImpactDashboard stats={impactStats} />
-            </div>
-            <div className="space-y-6">
-              <SensorMonitorPanel
-                readings={mockSensorReadings}
-                locationName="Community Fridge #1"
-              />
-            </div>
-          </section>
-
-          <section>
-            <h2 className="text-3xl font-bold mb-6">AI Quality Inspection</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <QualityInspectionResult
-                result={mockQualityResult}
-                imageUrl={inspectionImage}
-              />
-              <div className="bg-muted/50 rounded-md p-8 flex flex-col items-center justify-center text-center">
-                <span className="material-icons text-6xl text-muted-foreground mb-4">photo_camera</span>
-                <h3 className="text-xl font-semibold mb-2">Upload for AI Analysis</h3>
-                <p className="text-muted-foreground mb-6">
-                  Get instant quality assessment with computer vision
-                </p>
-                <Button onClick={() => setShowPostForm(true)}>
-                  <span className="material-icons text-sm mr-2">upload</span>
-                  Upload Photo
-                </Button>
-              </div>
-            </div>
-          </section>
-
-          <section>
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h2 className="text-3xl font-bold mb-2">Top Organizations</h2>
-                <p className="text-muted-foreground">
-                  Halifax NGOs and food banks rated by our AI-powered supplier scoring system
-                </p>
-              </div>
-              <Link href="/organizations">
-                <Button variant="outline" data-testid="button-view-all-orgs">
-                  View All Organizations
-                  <span className="material-icons text-sm ml-2">arrow_forward</span>
-                </Button>
-              </Link>
-            </div>
-            <div className="bg-primary/5 border border-primary/20 rounded-lg p-8 text-center">
-              <div className="flex flex-col items-center gap-4">
-                <div className="bg-primary/10 rounded-full p-4">
-                  <span className="material-icons text-5xl text-primary">apartment</span>
+                  )}
                 </div>
-                <h3 className="text-2xl font-bold">Discover Trusted Food Partners</h3>
-                <p className="text-muted-foreground max-w-2xl">
-                  Explore Halifax's leading food banks and NGOs. Our AI analyzes supplier ratings based on 
-                  Google reviews, food safety certifications, reliability metrics, and donation history to 
-                  help you find the most trustworthy organizations.
-                </p>
-                <div className="flex gap-4 mt-4">
-                  <Badge className="bg-primary/10 text-primary text-sm">
-                    <span className="material-icons text-xs mr-1">verified</span>
-                    6 Verified Organizations
-                  </Badge>
-                  <Badge className="bg-primary/10 text-primary text-sm">
-                    <span className="material-icons text-xs mr-1">stars</span>
-                    AI-Powered Ratings
-                  </Badge>
-                  <Badge className="bg-primary/10 text-primary text-sm">
-                    <span className="material-icons text-xs mr-1">security</span>
-                    Food Safety Certified
-                  </Badge>
-                </div>
-                <Link href="/organizations">
-                  <Button size="lg" className="mt-4" data-testid="button-explore-orgs">
-                    <span className="material-icons text-sm mr-2">explore</span>
-                    Explore Organizations
-                  </Button>
-                </Link>
               </div>
-            </div>
-          </section>
+            </article>
+          ))}
         </div>
-      </main>
-
-      <footer className="border-t mt-20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-            <div className="col-span-1 md:col-span-2">
-              <div className="flex items-center gap-2 mb-4">
-                <img src={foodLoopLogo} alt="FoodLoop AI" className="h-10 w-10 rounded-md" />
-                <span className="font-bold text-xl">FoodLoop AI</span>
-              </div>
-              <p className="text-muted-foreground mb-4">
-                Reducing food waste through AI-powered redistribution. 
-                Connecting surplus food with communities in need.
-              </p>
-              <div className="flex gap-4">
-                <Badge className="bg-primary/10 text-primary">
-                  <span className="material-icons text-xs mr-1">verified</span>
-                  AI Certified
-                </Badge>
-                <Badge className="bg-primary/10 text-primary">
-                  <span className="material-icons text-xs mr-1">eco</span>
-                  Carbon Neutral
-                </Badge>
-              </div>
-            </div>
-            
-            <div>
-              <h3 className="font-semibold mb-4">Platform</h3>
-              <ul className="space-y-2 text-muted-foreground">
-                <li><Link href="/map" className="hover:text-foreground">Find Food</Link></li>
-                <li><button onClick={() => setShowPostForm(true)} className="hover:text-foreground">Post Food</button></li>
-                <li><Link href="/monitor" className="hover:text-foreground">Monitor</Link></li>
-                <li><Link href="/impact" className="hover:text-foreground">Impact Dashboard</Link></li>
-              </ul>
-            </div>
-            
-            <div>
-              <h3 className="font-semibold mb-4">Company</h3>
-              <ul className="space-y-2 text-sm text-muted-foreground">
-                <li><a href="#" className="hover:text-foreground">About Us</a></li>
-                <li><a href="#" className="hover:text-foreground">AI Technology</a></li>
-                <li><a href="#" className="hover:text-foreground">Partners</a></li>
-                <li><a href="#" className="hover:text-foreground">Contact</a></li>
-              </ul>
-            </div>
-          </div>
-          
-          <div className="border-t mt-8 pt-8 text-center text-sm text-muted-foreground">
-            <p>© 2025 FoodLoop AI. Powered by Computer Vision, NLP & IoT.</p>
-          </div>
-        </div>
-      </footer>
-
-      <Dialog open={!!reservationId} onOpenChange={open => { if (!open) setReservationId(null); }}>
-        <DialogContent><DialogHeader><DialogTitle>Arrange a pickup</DialogTitle></DialogHeader>
-          {reservationId && <ReservationForm listingId={reservationId} onSuccess={() => { setReservationId(null); toast({ title: 'Reserved', description: 'Manage your pickup from Monitor.' }); }} />}
-        </DialogContent>
-      </Dialog>
-      <Dialog open={showPostForm} onOpenChange={setShowPostForm}>
+      </section>
+      <Dialog open={posting} onOpenChange={setPosting}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="sr-only">Post Food</DialogTitle>
+            <DialogTitle>Post surplus food</DialogTitle>
           </DialogHeader>
-          <PostFoodForm 
+          <PostFoodForm
             onSuccess={() => {
-              setShowPostForm(false);
-              queryClient.invalidateQueries({ queryKey: ["/api/food-listings"] });
+              setPosting(false);
+              queryClient.invalidateQueries();
             }}
           />
         </DialogContent>
       </Dialog>
-
-      <Sheet open={showMobileMenu} onOpenChange={setShowMobileMenu}>
-        <SheetContent side="left">
-          <SheetHeader>
-            <SheetTitle>Menu</SheetTitle>
-          </SheetHeader>
-          <nav className="flex flex-col gap-4 mt-8">
-            <Link href="/map" className="text-lg font-medium hover:text-primary">Find Food</Link>
-            <button onClick={() => { setShowPostForm(true); setShowMobileMenu(false); }} className="text-lg font-medium hover:text-primary text-left">Post Food</button>
-            <Link href="/monitor" className="text-lg font-medium hover:text-primary">Monitor</Link>
-            <Link href="/impact" className="text-lg font-medium hover:text-primary">Impact</Link>
-          </nav>
-        </SheetContent>
-      </Sheet>
-
-      {showChat && (
-        <div className="fixed bottom-24 right-4 z-50 shadow-xl">
-          <AIAssistantChat onClose={() => setShowChat(false)} />
-        </div>
-      )}
-
-      <Button
-        size="lg"
-        className="fixed bottom-4 right-4 z-40 rounded-full h-14 w-14 shadow-lg"
-        onClick={() => setShowChat(!showChat)}
-        data-testid="button-open-chat"
+      <Dialog
+        open={!!selected}
+        onOpenChange={(open) => {
+          if (!open) setSelected(null);
+        }}
       >
-        <MessageCircle className="h-6 w-6" />
-      </Button>
-    </div>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Arrange a pickup</DialogTitle>
+          </DialogHeader>
+          {selected && (
+            <ReservationForm
+              listingId={selected}
+              onSuccess={() => setSelected(null)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+    </main>
   );
 }
