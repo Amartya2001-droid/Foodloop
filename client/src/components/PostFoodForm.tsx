@@ -16,7 +16,8 @@ export default function PostFoodForm({ onSuccess }: Props) {
     queryKey: ["/api/auth/me"],
   });
   const organizations = useQuery<Organization[]>({
-    queryKey: ["/api/organizations"],
+    queryKey: ["/api/my-organizations"],
+    enabled: !!account.data?.user,
   });
   return (
     <form
@@ -142,13 +143,11 @@ export default function PostFoodForm({ onSuccess }: Props) {
           className="border rounded-md w-full p-2 bg-background"
         >
           <option value="">Personal donation</option>
-          {organizations.data
-            ?.filter((item) => item.ownerId === account.data?.user?.id)
-            .map((item) => (
-              <option value={item.id} key={item.id}>
-                {item.name}
-              </option>
-            ))}
+          {organizations.data?.map((item) => (
+            <option value={item.id} key={item.id}>
+              {item.name}
+            </option>
+          ))}
         </select>
       </label>
       <label className="block">

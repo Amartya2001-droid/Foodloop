@@ -1,3 +1,5 @@
+import { publicOrganization } from "./organization-routes";
+import { organizationRole } from "./organization-policy";
 import { installDataRoutes, supplierSummaries } from "./data-routes";
 import { inspectImage } from "./inspections";
 import type { Express } from "express";
@@ -14,7 +16,7 @@ import { promises as fs } from "fs";
 import OpenAI from "openai";
 import { z } from "zod";
 import { WorkflowError } from "./reservations";
-import { installAuth, requireUser, userId } from "./auth";
+import { installAuth, requireUser, userId, type AuthOptions } from "./auth";
 
 // Lazy initialization of OpenAI client
 let openai: OpenAI | null = null;
@@ -97,8 +99,11 @@ const upload = multer({
   },
 });
 
-export async function registerRoutes(app: Express): Promise<Server> {
-  installAuth(app);
+export async function registerRoutes(
+  app: Express,
+  authOptions: AuthOptions = {},
+): Promise<Server> {
+  installAuth(app, authOptions);
   app.use("/api", async (_req, res, next) => {
     try {
       await storage.expireReservations();
@@ -279,17 +284,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
             .status(400)
             .json({ error: "Pickup end must be after start" });
         if (validated.organizationId) {
-          const organization = await storage.getOrganization(
+          const state = await storage.getOrganizationState(
             validated.organizationId,
           );
-          if (!organization || organization.ownerId !== userId(res))
+          if (!state || !organizationRole(state, userId(res)))
             return res
               .status(403)
-              .json({ error: "Select an organization you own" });
+              .json({
+                error:
+                  "Select an organization where you have active membership",
+              });
         }
         const listing = await storage.createFoodListing(validated);
         res.status(201).json(listing);
       } catch (error: any) {
+        if (error instanceof WorkflowError)
+          return res.status(error.status).json({ error: error.message });
         console.error("Error creating food listing:", error);
         res
           .status(400)
@@ -331,11 +341,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         existing.status !== "available" ||
         (await storage.getClaimsForListing(existing.id)).length
       )
-        return res
-          .status(409)
-          .json({
-            error: "Listings with reservation history cannot be deleted",
-          });
+        return res.status(409).json({
+          error: "Listings with reservation history cannot be deleted",
+        });
       const deleted = await storage.deleteFoodListing(req.params.id);
       if (!deleted) {
         return res.status(404).json({ error: "Food listing not found" });
@@ -381,7 +389,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/organizations", async (req, res) => {
     try {
       const orgs = await storage.getAllOrganizations();
-      res.json(orgs);
+      res.json(
+        await Promise.all(orgs.map((org) => publicOrganization(org.id))),
+      );
     } catch (error) {
       console.error("Error fetching organizations:", error);
       res.status(500).json({ error: "Failed to fetch organizations" });
@@ -396,7 +406,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Organization not found" });
       }
 
-      res.json({ ...org, suppliers: await supplierSummaries(org.id) });
+      res.json({
+        ...(await publicOrganization(org.id)),
+        suppliers: await supplierSummaries(org.id),
+      });
     } catch (error) {
       console.error("Error fetching organization details:", error);
       res.status(500).json({ error: "Failed to fetch organization details" });
@@ -478,14 +491,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
         res.json(result);
       } catch (error: any) {
-        res
-          .status(error.message === "AI_NOT_CONFIGURED" ? 503 : 502)
-          .json({
-            error:
-              error.message === "AI_NOT_CONFIGURED"
-                ? "AI inspection unavailable; configure OPENAI_API_KEY or use manual observations"
-                : "AI provider returned an unavailable or invalid result",
-          });
+        res.status(error.message === "AI_NOT_CONFIGURED" ? 503 : 502).json({
+          error:
+            error.message === "AI_NOT_CONFIGURED"
+              ? "AI inspection unavailable; configure OPENAI_API_KEY or use manual observations"
+              : "AI provider returned an unavailable or invalid result",
+        });
       } finally {
         if (req.file) await fs.unlink(req.file.path).catch(() => {});
       }
@@ -525,14 +536,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }),
         );
       } catch (error: any) {
-        res
-          .status(error.message === "AI_NOT_CONFIGURED" ? 503 : 502)
-          .json({
-            error:
-              error.message === "AI_NOT_CONFIGURED"
-                ? "AI inspection unavailable; configure OPENAI_API_KEY or use manual observations"
-                : "AI provider returned an unavailable or invalid result",
-          });
+        res.status(error.message === "AI_NOT_CONFIGURED" ? 503 : 502).json({
+          error:
+            error.message === "AI_NOT_CONFIGURED"
+              ? "AI inspection unavailable; configure OPENAI_API_KEY or use manual observations"
+              : "AI provider returned an unavailable or invalid result",
+        });
       } finally {
         if (req.file) await fs.unlink(req.file.path).catch(() => {});
       }

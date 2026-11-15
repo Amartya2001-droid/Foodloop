@@ -1,0 +1,25 @@
+# Issue #3 — criterion and verification record
+
+Standing rules: branch and PR for changes; passing tests before opening; no secrets or invented credentials/claims; honest README/live status; daily issue #1 report as the final action.
+
+Day 5 baseline: `main` at `ed4c973` includes merged auth PR #7, reservation PR #9 and data-flow PR #10. PR #10 was checked again after merge: no review comments or unresolved review threads were present. Day 5 changes belong in one separate PR. Do not close #3 until the Day 5 implementation is also merged and each row below has been verified on merged main.
+
+| Issue #3 criterion | Already merged evidence | Day 5 completion and tests |
+| --- | --- | --- |
+| Secure password hashing; registration/login/logout/session identity | `server/auth.ts`, PR #7: salted scrypt, hashed opaque tokens, HttpOnly SameSite=Strict cookies, throttling and same-origin mutation checks. `tests/auth.test.mjs` covers wrong passwords, duplicates, forged cookies and logout. | `tests/access-control.test.mjs` confirms stored passwords are hashes, uses actual HTTP cookies, accepts access just before 12 hours, rejects it at the exact boundary and afterward, and confirms new login/old-token rejection/logout. Clock injection exists only as an internal constructor dependency; there is no HTTP test endpoint or shortened production TTL. |
+| Donor ownership derived from authenticated identity; no hardcoded demo actors | PR #7 derives donor IDs from sessions and monitor identity from the signed-in account. | Existing auth tests verify forged donor IDs are ignored and cross-user actions fail. Active membership allows association, not donor impersonation. |
+| Ownership/roles on listing edits/deletion and organization/device operations; donor monitor and claim-contact protection | PR #7 donor-only listing/sensor actions; PR #9 participant-only reservations. PR #10 donor-only quality reporting and owner-only organization association. | Shared organization policy adds invitation consent, owner/member/manager boundaries and immediate revocation. Storage rechecks association membership atomically. API tests cover denied anonymous/outsider/invitee/member/manager actions, inability to change another donor's listing, and revocation. Device hardware is not wired; no unauthenticated device write path exists. |
+| Organization membership and verification permissions | PR #10 has creator ownership and prohibits self-setting `verified`. | Owner controls invitations and roles; invitees consent; active members post their own donations; managers edit profiles. Only server-configured independent account IDs may approve/reject a review with a stored rationale/time/actor. Members, former members and owners cannot self-review. Edits invalidate review. Legacy verified flags without approval records are hidden. Tests cover duplicate decisions, resubmission, no configured reviewer, private evidence, invalidation and role denial. |
+| Tests for anonymous, cross-user and allowed actions, including expiry | `tests/auth.test.mjs`, `tests/reservations.test.mjs`, development/production smoke coverage in PRs #7/#9/#10. | New access-control tests plus a browser flow through invitation, acceptance, promotion, profile edit, review-request invalidation and removal. Existing browser donation/pickup/impact tests remain. |
+
+## Scope and policy
+
+The owner is immutable in this iteration: ownership transfer and organization deletion have no public API. Member and manager roles cannot grant ownership or verification. Pending invitations grant no organization rights. Membership records retain history, including declines/removals, and reviewers with any such history cannot independently review that organization.
+
+Review evidence is manually submitted and manually assessed by an Amartya-designated account; no external certification service is represented as connected. The approval audit is an app profile review, not food-safety certification. `ORGANIZATION_REVIEWER_IDS` is optional server configuration naming existing account IDs; with no configured reviewer the UI explicitly shows that approval is not available. Never invent or publish credentials. Session/data maps remain ephemeral locally, and sessions remain process-local even in database mode.
+
+New membership and review tables and constraints are declared in Drizzle and review-only migration `0003_organization_permissions.sql`. No hosted database was provisioned, connected or migrated. `DATABASE_URL` and deployment configuration remain Amartya's decisions; database runtime parity is still unverified. This infrastructure blocker does not justify claiming unmerged criteria are complete.
+
+## Merge gate
+
+On the issue, cite the baseline main commit for already merged rows and link the Day 5 PR for pending rows. After it merges, fetch main, verify the Day 5 code/tests are present and checks pass, document the resulting main SHA on #3, and only then close it. If it remains open at report time, keep #3 open and report the pending merge explicitly. Do not use an automatic closing keyword to bypass this gate.

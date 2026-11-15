@@ -1,4 +1,10 @@
 import {
+  organizationRole,
+  applyOrganizationCommand,
+  type OrganizationCommand,
+} from "./organization-policy";
+import { organizationMemberships, organizationReviews } from "@shared/schema";
+import {
   reserve,
   transition,
   WorkflowError,
@@ -84,11 +90,39 @@ export class DatabaseStorage implements IStorage {
   async createFoodListing(
     insertListing: InsertFoodListing,
   ): Promise<FoodListing> {
-    const result = await db
-      .insert(foodListings)
-      .values(insertListing)
-      .returning();
-    return result[0];
+    return db.transaction(async (tx) => {
+      if (insertListing.organizationId) {
+        const organization = (
+          await tx
+            .select()
+            .from(organizations)
+            .where(eq(organizations.id, insertListing.organizationId))
+            .for("update")
+        )[0];
+        const memberships = organization
+          ? await tx
+              .select()
+              .from(organizationMemberships)
+              .where(
+                eq(organizationMemberships.organizationId, organization.id),
+              )
+          : [];
+        if (
+          !organization ||
+          !organizationRole(
+            { organization, memberships, reviews: [] },
+            insertListing.donorId,
+          )
+        )
+          throw new WorkflowError(
+            403,
+            "Active organization membership required",
+          );
+      }
+      return (
+        await tx.insert(foodListings).values(insertListing).returning()
+      )[0];
+    });
   }
 
   async updateFoodListing(
@@ -259,6 +293,72 @@ export class DatabaseStorage implements IStorage {
   ): Promise<Organization> {
     const result = await db.insert(organizations).values(insertOrg).returning();
     return result[0];
+  }
+
+  async getOrganizationState(id: string) {
+    const organization = await this.getOrganization(id);
+    if (!organization) return undefined;
+    return {
+      organization,
+      memberships: await db
+        .select()
+        .from(organizationMemberships)
+        .where(eq(organizationMemberships.organizationId, id)),
+      reviews: await db
+        .select()
+        .from(organizationReviews)
+        .where(eq(organizationReviews.organizationId, id)),
+    };
+  }
+  async getMembershipsForUser(userId: string) {
+    return db
+      .select()
+      .from(organizationMemberships)
+      .where(eq(organizationMemberships.userId, userId));
+  }
+  async organizationAction(
+    id: string,
+    actor: string,
+    command: OrganizationCommand,
+  ) {
+    return db.transaction(async (tx) => {
+      const organization = (
+        await tx
+          .select()
+          .from(organizations)
+          .where(eq(organizations.id, id))
+          .for("update")
+      )[0];
+      if (!organization) throw new WorkflowError(404, "Organization not found");
+      const memberships = await tx
+        .select()
+        .from(organizationMemberships)
+        .where(eq(organizationMemberships.organizationId, id));
+      const reviews = await tx
+        .select()
+        .from(organizationReviews)
+        .where(eq(organizationReviews.organizationId, id));
+      const state = applyOrganizationCommand(
+        { organization, memberships, reviews },
+        actor,
+        command,
+      );
+      await tx
+        .update(organizations)
+        .set(state.organization)
+        .where(eq(organizations.id, id));
+      for (const row of state.memberships)
+        await tx
+          .insert(organizationMemberships)
+          .values(row)
+          .onConflictDoUpdate({ target: organizationMemberships.id, set: row });
+      for (const row of state.reviews)
+        await tx
+          .insert(organizationReviews)
+          .values(row)
+          .onConflictDoUpdate({ target: organizationReviews.id, set: row });
+      return state;
+    });
   }
 
   async getRatingsForOrganization(

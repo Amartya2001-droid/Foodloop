@@ -33,29 +33,41 @@ Try the flow:
 | Flow | Source and honest limits |
 | --- | --- |
 | Accounts | Salted scrypt password hashes; random opaque sessions stored as hashes; HttpOnly SameSite=Strict cookies; 12-hour expiry, login throttling and cross-origin browser mutation rejection. No recovery/email verification or multi-instance session store. Sessions reset on restart in every storage mode. |
-| Authorization | Ownership comes from the session, not form input. Only donors can mutate their food or submit readings/quality reports. Reservation details are restricted to donor/recipient. Organizations are owned by their creator and cannot self-verify. Shared memberships and independent verification are not implemented. |
+| Authorization | Ownership comes from the session, not form input. Only donors can mutate their food or submit readings/quality reports. Reservation details are restricted to donor/recipient. Organizations have owner-controlled invitations and member/manager roles; invitations require consent. Only configured independent reviewers can approve profile review. See the permission rules below. |
 | Reservations | Atomic availability check and claim creation; future pickup within the donor's window and before expiry; cancellation before pickup; recipient pickup then donor confirmation. Generic PATCH cannot change lifecycle status. Reservation history cannot be deleted. |
 | Expiry | Reserved food is released two hours after arranged pickup, or at food expiry if earlier. Expiry reconciles on API requests, not a background scheduler. Expired food is excluded from available listings. |
 | Sensors | Actual donor-submitted temperature (°C) and humidity (%) with server timestamps. Empty, failed and stale (>15 minutes) states are shown. Hardware/device ingestion is **not yet wired**; no simulated live readings. |
 | Quality | Owner-entered observations with provenance/time, or an optional validated AI visual observation. No fabricated scores, confidence, shelf life, certification or default “85% fresh” display. An observation is not food-safety certification. |
 | Impact | Confirmed pickup count, active reservations, donors with completed pickups and donor-reported listing weight for completed pickups. Weight coverage is shown; meals and CO₂ are **not measured** and are not estimated. Seven-day counts use UTC dates. |
 | Suppliers | Actual posted/available donation counts and confirmed pickups. No staged AI scoring, seeded ratings, Google reviews or certification claims. Old supplier rating rows are not used as verified evidence. |
-| Organizations | User-created contact/location profiles and owner-associated donation activity. Every profile is labeled community-submitted and not independently verified. |
+| Organizations | User-created contact/location profiles and owner/member-associated donation activity. Unreviewed profiles are labeled as such; only an audited independent app review can show reviewed. This is not regulatory certification. |
 | Locations | User-entered coordinates link to OpenStreetMap. The old marker grid is removed; an embedded geographic map is **not yet wired**. `/map` remains a compatible alias to food browsing. |
 
 Legacy fabricated displays/examples were removed from active product code. `server/seed.ts` refuses automatic seeding rather than deleting data and inserting demo passwords/metrics. Isolated test fixtures remain clearly synthetic. The optional AI chat endpoint remains implemented; the main UI focuses on the donation workflow.
+
+## Organization permissions and review
+
+- The creator is the fixed **owner**. Ownership cannot be changed through profile or membership forms. Only the owner invites existing accounts, changes member/manager roles, removes others or submits review evidence. An invite alone grants no access.
+- Invitees accept or decline their own invitations. Active **members** and **managers** can associate their own donations with the organization. Members may leave; declined/removed memberships grant no rights. No organization role can edit another donor's food or read unrelated reservation contacts.
+- **Managers** may edit profile fields and see membership/review information. They cannot manage other members, request verification or grant themselves roles. Profile changes invalidate previous verification and supersede pending review requests.
+- Organization evidence and review notes are private to owner/managers and authorized independent reviewers. Public profiles show only reviewed/unreviewed/pending status and review time, without private evidence.
+- **Reviewers** are existing accounts explicitly configured by immutable ID in `ORGANIZATION_REVIEWER_IDS`. Public registration never grants this role. Owners and anyone with membership history in the organization cannot review it, even after leaving. Configured reviewers cannot be invited into organizations. Decisions require a rationale and persist reviewer, timestamp and status; duplicate decisions conflict. Rejection permits resubmission.
+- No reviewer is configured automatically. The UI shows that approval is not yet available and permits honest pending requests. An approved app profile review is not food-safety certification, independent accreditation or a claim that an external API validated evidence. Legacy `verified` flags without an audited approval are displayed as unverified.
+
+Memory mutations are atomic in one process. PostgreSQL membership/verification operations serialize on an organization row lock, including the membership check when creating an associated donation. Reviewer assignment and hosted database setup remain Amartya's decisions. See [AUTHORIZATION.md](AUTHORIZATION.md) for the issue #3 criterion/evidence matrix and merge-gated completion rule.
 
 ## Storage and services
 
 Features call `IStorage` in `server/storage.ts`. `STORAGE_MODE=memory` selects ephemeral maps. Omitting it, or choosing `database`, uses the existing PostgreSQL adapter and requires a real **`DATABASE_URL`**. Unknown modes fail rather than silently falling back. The current Neon driver uses WebSocket transport; an ordinary local PostgreSQL URL is not a supported substitute by itself.
 
-The PostgreSQL adapter implements the same workflows with transactions/row locks and an active-reservation unique index. Drizzle declares added reservation, organization ownership and listing-weight fields. Review `migrations/0001_reservation_workflow.sql` and `0002_real_data_flows.sql` for an existing database, or review a schema push against an approved fresh database. Do not run both blindly. **No hosted database was provisioned, connected or migrated, and database runtime parity remains unverified.** Provisioning and deployment are Amartya's decisions.
+The PostgreSQL adapter implements the same workflows with transactions/row locks and an active-reservation unique index. Drizzle declares added reservation, organization ownership and listing-weight fields. Review `migrations/0001_reservation_workflow.sql` and `0002_real_data_flows.sql` and `0003_organization_permissions.sql` for an existing database, or review a schema push against an approved fresh database. Do not run both blindly. **No hosted database was provisioned, connected or migrated, and database runtime parity remains unverified.** Provisioning and deployment are Amartya's decisions.
 
 Exact configuration needs:
 
 - `DATABASE_URL`: required only for approved database-backed operation; not needed locally in memory mode.
 - `OPENAI_API_KEY`: optional, required only for real external AI photo inspection/chat. Without it photo inspection returns 503 and manual observations remain usable. No successful external call has been claimed.
 - `OPENAI_BASE_URL`: optional server-controlled endpoint override for a compatible provider or local test stub; omit for OpenAI. Never accepted from browser input.
+- `ORGANIZATION_REVIEWER_IDS`: optional comma-separated IDs of existing trusted user accounts, chosen by Amartya through server configuration. No reviewer is configured by default; requests remain pending until a reviewer is designated. Account IDs are not credentials. Never create a public HTTP setting for this list. Memory-mode IDs change when accounts reset, so reconfigure them after restart.
 - `COOKIE_SECURE=true`: deployment setting for HTTPS cookies; configure a same-origin HTTPS proxy. No session signing secret is needed for opaque server-held sessions.
 - `PORT`: optional; defaults to 5000.
 
@@ -74,7 +86,7 @@ npm run test:browser
 PLAYWRIGHT_CHROMIUM_EXECUTABLE=/usr/bin/chromium npm run test:browser
 ```
 
-CI on Node 22 runs type checking, build, API tests and Chromium browser coverage. Build warnings for outdated Browserslist data and PostCSS remain. Coverage is not exhaustive: explicit session-expiry integration coverage, generalized organization memberships, production session persistence, database runtime tests, independent food verification, hardware telemetry and deployment hardening remain follow-ups.
+CI on Node 22 runs type checking, build, API tests and Chromium browser coverage. Build warnings for outdated Browserslist data and PostCSS remain. Coverage is not exhaustive: production session persistence, database runtime tests, independent food-safety verification, hardware telemetry and deployment hardening remain follow-ups. Deterministic session-expiry HTTP tests cover the instant before expiry, the exact 12-hour boundary, stale-cookie rejection and fresh-login/logout behavior. Membership and review tests cover permission boundaries, consent, revocation, self-review denial, audit history and invalidation.
 
 ## Licence and program log
 

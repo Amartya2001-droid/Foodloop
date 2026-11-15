@@ -81,14 +81,12 @@ test("two people donate, measure, reserve and confirm a real pickup", async ({
   ).toBeVisible();
   await donor.getByRole("link", { name: "Impact", exact: true }).click();
   await expect(
-    donor
-      .getByRole("article")
-      .filter({
-        has: donor.getByRole("heading", {
-          name: "Confirmed pickups",
-          exact: true,
-        }),
+    donor.getByRole("article").filter({
+      has: donor.getByRole("heading", {
+        name: "Confirmed pickups",
+        exact: true,
       }),
+    }),
   ).toContainText("1");
   await expect(
     donor.getByText("Meals and CO₂ savings are not measured", { exact: false }),
@@ -125,4 +123,93 @@ test("failed data source shows unavailable state without invented totals", async
   await expect(
     page.getByRole("heading", { name: "Confirmed pickups", exact: true }),
   ).toHaveCount(0);
+});
+
+test("organization invitations require consent and manager changes invalidate pending review", async ({
+  browser,
+}) => {
+  const ownerContext = await browser.newContext(),
+    memberContext = await browser.newContext();
+  const owner = await ownerContext.newPage(),
+    member = await memberContext.newPage();
+  await account(owner, "org-ui-owner");
+  await account(member, "org-ui-member");
+  await owner.getByRole("link", { name: "Organizations", exact: true }).click();
+  await owner.getByRole("button", { name: "Add organization" }).click();
+  await owner.getByLabel("Name", { exact: true }).fill("Browser pantry");
+  await owner
+    .getByLabel("Description", { exact: true })
+    .fill("A synthetic browser-test organization");
+  await owner
+    .getByLabel("Address", { exact: true })
+    .fill("Test community entrance");
+  await owner
+    .getByLabel("Contact email", { exact: true })
+    .fill("pantry@example.invalid");
+  await owner.getByLabel("Contact phone", { exact: true }).fill("Test contact");
+  await owner.getByLabel("Latitude", { exact: true }).fill("44.65");
+  await owner.getByLabel("Longitude", { exact: true }).fill("-63.58");
+  await owner
+    .getByRole("button", { name: "Create profile", exact: true })
+    .click();
+  await owner.getByRole("link", { name: "Profile & activity →" }).click();
+  await owner
+    .getByLabel("Account username", { exact: true })
+    .fill("org-ui-member");
+  await owner
+    .getByRole("button", { name: "Invite account", exact: true })
+    .click();
+  await expect(
+    owner.getByText("org-ui-member · member · invited", { exact: true }),
+  ).toBeVisible();
+  await member
+    .getByRole("link", { name: "Organizations", exact: true })
+    .click();
+  await member.getByRole("button", { name: "Accept invitation" }).click();
+  await member.getByRole("link", { name: "Profile & activity →" }).click();
+  await expect(
+    member.getByText("Your role: member.", { exact: false }),
+  ).toBeVisible();
+  await expect(
+    member.getByRole("button", { name: "Save profile", exact: true }),
+  ).toHaveCount(0);
+  await owner.reload();
+  await owner
+    .getByRole("button", { name: "Make manager", exact: true })
+    .click();
+  await owner
+    .getByLabel("Evidence for reviewer")
+    .fill("Synthetic evidence to demonstrate a pending profile review.");
+  await owner
+    .getByRole("button", { name: "Request independent review", exact: true })
+    .click();
+  await expect(
+    owner.getByText("No reviewer configured yet.", { exact: false }),
+  ).toBeVisible();
+  await expect(
+    owner.getByRole("heading", { name: /^pending ·/ }),
+  ).toBeVisible();
+  await member.reload();
+  await member
+    .getByLabel("Profile description", { exact: true })
+    .fill("Updated by an accepted manager.");
+  await member
+    .getByRole("button", { name: "Save profile", exact: true })
+    .click();
+  await expect(
+    member.getByRole("heading", { name: /^superseded ·/ }),
+  ).toBeVisible();
+  await owner.reload();
+  await owner
+    .getByRole("button", { name: "Remove org-ui-member", exact: true })
+    .click();
+  await member.reload();
+  await expect(
+    member.getByText("Your role: visitor.", { exact: false }),
+  ).toBeVisible();
+  await expect(
+    member.getByRole("button", { name: "Save profile", exact: true }),
+  ).toHaveCount(0);
+  await ownerContext.close();
+  await memberContext.close();
 });
