@@ -32,6 +32,7 @@ export async function server(port, overrides = {}) {
       await new Promise((r) =>
         child.exitCode !== null ? r() : child.once("exit", r),
       );
+      return child.exitCode;
     },
   };
 }

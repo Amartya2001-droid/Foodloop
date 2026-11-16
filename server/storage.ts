@@ -41,6 +41,8 @@ import { randomUUID } from "crypto";
 // you might need
 
 export interface IStorage {
+  checkHealth(): Promise<void>;
+  close(): Promise<void>;
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
@@ -96,6 +98,9 @@ export interface IStorage {
 }
 
 export class MemStorage implements IStorage {
+  // The memory store has no external connection to probe or release.
+  async checkHealth(): Promise<void> {}
+  async close(): Promise<void> {}
   private users: Map<string, User>;
   private foodListings: Map<string, FoodListing>;
   private sensorData: Map<string, SensorData>;
