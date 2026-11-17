@@ -104,15 +104,14 @@ for (const mode of ["production", "development"]) {
         ).status,
         404,
       );
-      assert.equal(
-        (
-          await request(`${base}/api/food-listings`, {
-            method: "POST",
-            body: new FormData(),
-          })
-        ).status,
-        400,
-      );
+      const invalidListing = await request(`${base}/api/food-listings`, {
+        method: "POST",
+        body: new FormData(),
+      });
+      assert.equal(invalidListing.status, 400);
+      assert.deepEqual(await invalidListing.json(), {
+        error: "Invalid food listing details",
+      });
       const form = new FormData();
       for (const [k, v] of Object.entries({
         title: "Smoke test",
@@ -127,6 +126,17 @@ for (const mode of ["production", "development"]) {
         pickupTimeEnd: "2026-11-11T13:00:00Z",
       }))
         form.set(k, v);
+      const malformed = new FormData();
+      for (const [key, value] of form) malformed.set(key, value);
+      malformed.set("defectsDetected", "{");
+      const invalidJson = await request(`${base}/api/food-listings`, {
+        method: "POST",
+        body: malformed,
+      });
+      assert.equal(invalidJson.status, 400);
+      assert.deepEqual(await invalidJson.json(), {
+        error: "Invalid food listing details",
+      });
       const created = await request(`${base}/api/food-listings`, {
         method: "POST",
         body: form,
@@ -161,16 +171,15 @@ for (const mode of ["production", "development"]) {
       ).json();
       assert.equal(sensors.length, 1);
       assert.equal(sensors[0].temperature, 4);
-      assert.equal(
-        (
-          await request(`${base}/api/sensor-data`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: "{}",
-          })
-        ).status,
-        400,
-      );
+      const invalidSensor = await request(`${base}/api/sensor-data`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      assert.equal(invalidSensor.status, 400);
+      assert.deepEqual(await invalidSensor.json(), {
+        error: "Invalid sensor reading",
+      });
 
       const claimed = await request(`${base}/api/food-listings/${listing.id}`, {
         method: "PATCH",
@@ -212,6 +221,10 @@ for (const mode of ["production", "development"]) {
         child.exitCode !== null ? resolve() : child.once("exit", resolve),
       );
       assert.equal(child.exitCode, 0, output);
+      assert.doesNotMatch(
+        output,
+        /ZodError|Error creating food listing|Error creating sensor data|UnhandledPromiseRejection/,
+      );
     }
   });
 }

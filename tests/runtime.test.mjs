@@ -195,3 +195,28 @@ test("built production memory server exposes probes and exits cleanly on SIGTERM
     assert.equal(await app.close(), 0);
   }
 });
+
+for (const [mode, expectedCode] of [
+  ["draining-cancellation", 0],
+  ["running-cancellation", 1],
+  ["unexpected-during-drain", 1],
+]) {
+  test(`Vite ${mode} exits with the correct runtime status`, async () => {
+    const child = spawn(
+      process.execPath,
+      ["--import", "tsx", "tests/fixtures/vite-logger.ts", mode],
+      { stdio: ["ignore", "ignore", "pipe"] },
+    );
+    let output = "";
+    child.stderr.on("data", (chunk) => (output += chunk));
+    try {
+      const [code, signal] = await once(child, "exit", {
+        signal: AbortSignal.timeout(10000),
+      });
+      assert.equal(signal, null);
+      assert.equal(code, expectedCode, output);
+    } finally {
+      if (child.exitCode === null) child.kill("SIGKILL");
+    }
+  });
+}

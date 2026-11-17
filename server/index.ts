@@ -55,7 +55,7 @@ app.use((req, res, next) => {
   });
   let closeFrontend = async () => {};
   if (app.get("env") === "development") {
-    const vite = await setupVite(app, server);
+    const vite = await setupVite(app, server, () => lifecycle.draining);
     closeFrontend = () => vite.close();
   } else serveStatic(app);
 

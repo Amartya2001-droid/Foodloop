@@ -15,7 +15,7 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
-    command: "npm start",
+    command: process.env.PLAYWRIGHT_DEV === "1" ? "npm run dev" : "npm start",
     url: "http://127.0.0.1:5140/api/auth/me",
     env: {
       PORT: "5140",

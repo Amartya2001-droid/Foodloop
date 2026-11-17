@@ -65,6 +65,8 @@ Memory storage has no external dependency, so readiness means the in-process sto
 
 On SIGTERM or SIGINT the runtime first marks itself draining, then stops accepting new HTTP connections. Requests already executing may finish; any later request admitted on an existing connection receives 503 with `Connection: close`. Readiness cannot return to ready after drain starts. Once HTTP drains, the PostgreSQL pool (when selected) and development Vite resources close. Clean shutdown exits 0. The whole drain/resource-cleanup phase has a fixed **10-second deadline**; a failure or deadline exhaustion forcibly closes HTTP connections and exits 1. Configure a deployment host's termination grace period to exceed that deadline. No deployment settings have been applied here.
 
+Development disables speculative HTML pre-transforms so actual request work can drain before optimizer teardown; on-demand transforms remain enabled. Development shutdown tolerates Vite's expected optimizer build-cancellation message only while draining; ordinary build failures and unexpected shutdown errors remain fatal. Listing/sensor validation failures return clean 400 responses without logging Zod stacks; unexpected storage failures return generic 500 responses. Regression tests exercise the actual Vite logger in both runtime phases, malformed listing JSON and invalid sensor/listing input before asserting a clean SIGTERM exit.
+
 Probes do not make memory data durable or process-local sessions shared, verify external AI/hardware, certify food safety, or establish a live deployment. Shutdown/probe tests use local memory and controlled dependency/signal fixtures; they do not require a real `DATABASE_URL` or reviewer assignments.
 
 ## Organization permissions and review
@@ -106,6 +108,8 @@ npx playwright install chromium
 npm run test:browser
 # If a system Chromium is already installed:
 PLAYWRIGHT_CHROMIUM_EXECUTABLE=/usr/bin/chromium npm run test:browser
+# Exercise the same browser flows against the development server:
+PLAYWRIGHT_DEV=1 PLAYWRIGHT_CHROMIUM_EXECUTABLE=/usr/bin/chromium npm run test:browser
 ```
 
 Runtime tests also cover health status/error redaction, bounded shared probes, draining, both termination signals with an in-flight request, resource cleanup failures, forced deadlines and built production probes. CI on Node 22 runs type checking, build, API tests and Chromium browser coverage. Build warnings for outdated Browserslist data and PostCSS remain. Coverage is not exhaustive: production session persistence, database runtime tests, independent food-safety verification, hardware telemetry and deployment hardening remain follow-ups. Deterministic session-expiry HTTP tests cover the instant before expiry, the exact 12-hour boundary, stale-cookie rejection and fresh-login/logout behavior. Membership and review tests cover permission boundaries, consent, revocation, self-review denial, audit history and invalidation.
