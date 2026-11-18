@@ -288,22 +288,21 @@ export async function registerRoutes(
             validated.organizationId,
           );
           if (!state || !organizationRole(state, userId(res)))
-            return res
-              .status(403)
-              .json({
-                error:
-                  "Select an organization where you have active membership",
-              });
+            return res.status(403).json({
+              error: "Select an organization where you have active membership",
+            });
         }
         const listing = await storage.createFoodListing(validated);
         res.status(201).json(listing);
       } catch (error: any) {
         if (error instanceof WorkflowError)
           return res.status(error.status).json({ error: error.message });
-        console.error("Error creating food listing:", error);
-        res
-          .status(400)
-          .json({ error: error.message || "Failed to create food listing" });
+        if (error instanceof z.ZodError || error instanceof SyntaxError)
+          return res
+            .status(400)
+            .json({ error: "Invalid food listing details" });
+        console.error("Food listing storage operation failed");
+        res.status(500).json({ error: "Failed to create food listing" });
       }
     },
   );
@@ -467,10 +466,10 @@ export async function registerRoutes(
       const data = await storage.createSensorData(validated);
       res.status(201).json(data);
     } catch (error: any) {
-      console.error("Error creating sensor data:", error);
-      res
-        .status(400)
-        .json({ error: error.message || "Failed to create sensor data" });
+      if (error instanceof z.ZodError)
+        return res.status(400).json({ error: "Invalid sensor reading" });
+      console.error("Sensor storage operation failed");
+      res.status(500).json({ error: "Failed to create sensor data" });
     }
   });
 

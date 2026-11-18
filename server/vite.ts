@@ -19,9 +19,16 @@ export function log(message: string, source = "express") {
   console.log(`${formattedTime} [${source}] ${message}`);
 }
 
-export async function setupVite(app: Express, server: Server) {
+export async function setupVite(
+  app: Express,
+  server: Server,
+  isDraining = () => false,
+) {
   const serverOptions = {
     middlewareMode: true,
+    // Keep transforms tied to real requests so HTTP drain can finish them before
+    // optimizer teardown. Speculative HTML warm-ups can otherwise hang close().
+    preTransformRequests: false,
     hmr: { server },
     allowedHosts: true as const,
   };
@@ -33,7 +40,11 @@ export async function setupVite(app: Express, server: Server) {
       ...viteLogger,
       error: (msg, options) => {
         viteLogger.error(msg, options);
-        process.exit(1);
+        // Optimizer cancellation can be logged while vite.close() is draining.
+        // Keep ordinary development errors fatal, but let intentional cleanup finish.
+        const expectedCancellation =
+          isDraining() && /The build was cancel(?:ed|led)/.test(msg);
+        if (!expectedCancellation) process.exit(1);
       },
     },
     server: serverOptions,
@@ -65,6 +76,7 @@ export async function setupVite(app: Express, server: Server) {
       next(e);
     }
   });
+  return vite;
 }
 
 export function serveStatic(app: Express) {

@@ -32,10 +32,17 @@ import {
   supplierRatings,
 } from "@shared/schema";
 import type { IStorage } from "./storage";
-import { db } from "./db";
+import { db, pool } from "./db";
 import { eq, or, inArray, and, isNull, gt, desc } from "drizzle-orm";
 
 export class DatabaseStorage implements IStorage {
+  async checkHealth(): Promise<void> {
+    await db.select({ id: foodListings.id }).from(foodListings).limit(1);
+  }
+  async close(): Promise<void> {
+    await pool.end();
+  }
+
   async getUser(id: string): Promise<User | undefined> {
     const result = await db
       .select()
