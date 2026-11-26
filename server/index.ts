@@ -1,76 +1,20 @@
-import express, {
-  type Request,
-  type Response,
-  type NextFunction,
-} from "express";
-import { registerRoutes } from "./routes";
-import { setupVite, serveStatic, log } from "./vite";
-import { storage } from "./storage";
-import {
-  Lifecycle,
-  installHealthRoutes,
-  installShutdownHandlers,
-} from "./lifecycle";
+import { applyConfig, ConfigurationError, readConfig } from "./config";
 
-const app = express();
-const lifecycle = new Lifecycle(() => storage.checkHealth());
-installHealthRoutes(app, lifecycle);
-
-declare module "http" {
-  interface IncomingMessage {
-    rawBody: unknown;
-  }
+async function main() {
+  // Validate before runtime imports can initialize a database, AI client or Vite.
+  const config = readConfig(process.env);
+  applyConfig(config);
+  const { startServer } = await import("./app");
+  await startServer(config);
 }
-app.use(
-  express.json({
-    verify: (req, _res, buf) => {
-      req.rawBody = buf;
-    },
-  }),
-);
-app.use(express.urlencoded({ extended: false }));
-app.use((req, res, next) => {
-  const start = Date.now();
-  const path = req.path;
-  res.on("finish", () => {
-    if (path.startsWith("/api"))
-      log(
-        `${req.method} ${path} ${res.statusCode} in ${Date.now() - start}ms`.slice(
-          0,
-          80,
-        ),
-      );
-  });
-  next();
-});
 
-(async () => {
-  const server = await registerRoutes(app);
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    res
-      .status(status)
-      .json({ message: err.message || "Internal Server Error" });
-    console.error("Request failed", status);
-  });
-  let closeFrontend = async () => {};
-  if (app.get("env") === "development") {
-    const vite = await setupVite(app, server, () => lifecycle.draining);
-    closeFrontend = () => vite.close();
-  } else serveStatic(app);
-
-  installShutdownHandlers(server, lifecycle, async () => {
-    log("HTTP drained; closing runtime resources");
-    await Promise.all([storage.close(), closeFrontend()]);
-    log("Runtime resources closed");
-  });
-  const port = parseInt(process.env.PORT || "5000", 10);
-  server.listen({ port, host: "0.0.0.0", reusePort: true }, () => {
-    lifecycle.markServing();
-    log(`serving on port ${port}`);
-  });
-})().catch(() => {
-  // Startup failures must not print connection strings or credentials.
-  console.error("Server initialization failed");
+void main().catch((error) => {
+  // Only our value-free messages are printable. Never expose dependency errors,
+  // connection strings, account IDs or credentials in startup output.
+  console.error(
+    error instanceof ConfigurationError
+      ? error.message
+      : "Server initialization failed; check deployment configuration and runtime resources",
+  );
   process.exit(1);
 });

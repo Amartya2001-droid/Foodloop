@@ -52,7 +52,7 @@ The HTTP server exposes two unauthenticated, non-cached operational endpoints, i
 | Probe | Result |
 | --- | --- |
 | `GET /health/live` | 200 with `{"status":"alive"}` while the HTTP process can respond. This remains liveness, not storage readiness. |
-| `GET /health/ready` | 200 with `{"status":"ready"}` only after initialization and a successful storage probe. Startup, drain, failed storage or a one-second probe timeout returns 503 with `{"status":"not_ready"}`. |
+| `GET /health/ready` | 200 with `{"status":"ready"}` only after initialization and a successful storage probe. Once listening, drain, failed storage or a one-second probe timeout returns 503 with `{"status":"not_ready"}`. |
 
 Verify a local memory run with:
 
@@ -76,7 +76,7 @@ Probes do not make memory data durable or process-local sessions shared, verify 
 - **Managers** may edit profile fields and see membership/review information. They cannot manage other members, request verification or grant themselves roles. Profile changes invalidate previous verification and supersede pending review requests.
 - Organization evidence and review notes are private to owner/managers and authorized independent reviewers. Public profiles show only reviewed/unreviewed/pending status and review time, without private evidence.
 - **Reviewers** are existing accounts explicitly configured by immutable ID in `ORGANIZATION_REVIEWER_IDS`. Public registration never grants this role. Owners and anyone with membership history in the organization cannot review it, even after leaving. Configured reviewers cannot be invited into organizations. Decisions require a rationale and persist reviewer, timestamp and status; duplicate decisions conflict. Rejection permits resubmission.
-- No reviewer is configured automatically. The UI shows that approval is not yet available and permits honest pending requests. An approved app profile review is not food-safety certification, independent accreditation or a claim that an external API validated evidence. Legacy `verified` flags without an audited approval are displayed as unverified.
+- No reviewer is configured automatically. Startup rejects nonexistent configured account references; fresh memory runs must leave the list unset. The UI shows that approval is not yet available and permits honest pending requests. An approved app profile review is not food-safety certification, independent accreditation or a claim that an external API validated evidence. Legacy `verified` flags without an audited approval are displayed as unverified.
 
 Memory mutations are atomic in one process. PostgreSQL membership/verification operations serialize on an organization row lock, including the membership check when creating an associated donation. Reviewer assignment and hosted database setup remain Amartya's decisions. See [AUTHORIZATION.md](AUTHORIZATION.md) for the issue #3 criterion/evidence matrix and merge-gated completion rule.
 
@@ -86,16 +86,28 @@ Features call `IStorage` in `server/storage.ts`. `STORAGE_MODE=memory` selects e
 
 The PostgreSQL adapter implements the same workflows with transactions/row locks and an active-reservation unique index. Drizzle declares added reservation, organization ownership and listing-weight fields. Review `migrations/0001_reservation_workflow.sql` and `0002_real_data_flows.sql` and `0003_organization_permissions.sql` for an existing database, or review a schema push against an approved fresh database. Do not run both blindly. **No hosted database was provisioned, connected or migrated, and database runtime parity remains unverified.** Provisioning and deployment are Amartya's decisions.
 
-Exact configuration needs:
+## Startup and deployment contract
 
-- `DATABASE_URL`: required only for approved database-backed operation; not needed locally in memory mode.
-- `OPENAI_API_KEY`: optional, required only for real external AI photo inspection/chat. Without it photo inspection returns 503 and manual observations remain usable. No successful external call has been claimed.
-- `OPENAI_BASE_URL`: optional server-controlled endpoint override for a compatible provider or local test stub; omit for OpenAI. Never accepted from browser input.
-- `ORGANIZATION_REVIEWER_IDS`: optional comma-separated IDs of existing trusted user accounts, chosen by Amartya through server configuration. No reviewer is configured by default; requests remain pending until a reviewer is designated. Account IDs are not credentials. Never create a public HTTP setting for this list. Memory-mode IDs change when accounts reset, so reconfigure them after restart.
-- `COOKIE_SECURE=true`: deployment setting for HTTPS cookies; configure a same-origin HTTPS proxy. No session signing secret is needed for opaque server-held sessions.
-- `PORT`: optional; defaults to 5000.
+`server/index.ts` validates configuration before runtime/storage initialization. Invalid settings exit **1**, name the offending environment variables and never echo their values. Then one **5-second budget** covers the storage probe and all configured reviewer-account lookups, before any HTTP listener opens. A failed/timed-out check exits 1; syntax validation alone is not proof that credentials or a database work. The storage probe reads at most one listing ID, not every schema table/workflow. Real database startup remains unverified here.
 
-No keys belong in source, issue comments or PR bodies. The runtime does not automatically load `.env` files.
+| Variable | Required/default | Accepted contract |
+| --- | --- | --- |
+| `NODE_ENV` | Defaults to `development`; npm scripts select development/production | `development`, `production` or `test` only. |
+| `STORAGE_MODE` | Defaults to `database` | `database` or explicit `memory`. Use `memory` for credential-free, ephemeral local runs. No silent fallback. |
+| `DATABASE_URL` | Required in database mode | PostgreSQL URL (`postgres:`/`postgresql:`) with hostname and database name, no raw whitespace or fragment. Any supplied nonempty value is syntax-checked, even in memory mode. No real URL is supplied by this repo; Amartya provides approved compatible configuration. |
+| `PORT` | Defaults to `5000` | Complete decimal integer **1–65535**, no trailing text, whitespace, fractional/scientific notation or port zero. Binds `0.0.0.0` on that one HTTP port. Bind failures name PORT. |
+| `COOKIE_SECURE` | Defaults to `false` for local HTTP | Exact `true` or `false`. Real HTTPS hosting requires secure cookies; this flag does not configure TLS or trusted proxy handling. |
+| `OPENAI_API_KEY` | Optional; unset/empty disables external AI | Non-whitespace token when supplied. No prefix/credential is guessed and no provider call is made at startup. Manual workflows work without it; AI endpoints remain unavailable without a key. |
+| `OPENAI_BASE_URL` | Optional; requires `OPENAI_API_KEY` if set | HTTPS, or HTTP on `localhost`, `127.0.0.1` or `[::1]` for a local stub. No userinfo, query, fragment or raw whitespace. Never accepted from browser input. |
+| `ORGANIZATION_REVIEWER_IDS` | Optional; unset/empty means no reviewer | Unique comma-separated UUID references to **existing trusted accounts selected by Amartya**. Whitespace around entries is trimmed and UUID case normalized. Invalid, duplicate, empty or nonexistent references fail startup; no accounts/roles are created automatically. |
+
+Unset optional settings use the defaults above. Explicit empty `NODE_ENV`, `STORAGE_MODE`, `PORT` or `COOKIE_SECURE` is invalid. No key belongs in source, PR bodies or issue comments; inject approved secrets through the chosen runtime environment. `.env` files are not automatically loaded.
+
+A fresh memory store contains no accounts, so leave `ORGANIZATION_REVIEWER_IDS` unset for that mode; pending review is honest, but real reviewer approval needs persisted existing account references and Amartya's selection. Optional external AI credentials are not validated against a live service at startup.
+
+Build with `npm ci && npm run build`, then run `STORAGE_MODE=memory npm start` for a local production-bundle check. The existing **`GET /health/live`** and **`GET /health/ready`** endpoints share the configured HTTP port and require no authentication. Before validation/preflight completes, there is no listener; an invalid startup must not serve either endpoint. After listening, liveness returns 200 `alive`; readiness returns 200 `ready` only when its bounded storage probe succeeds, otherwise 503 `not_ready`. See the health section for the one-second readiness bound and ten-second shutdown deadline.
+
+**Owner-blocked release gates:** Amartya supplies DATABASE_URL, approves schema/migration execution and deployment configuration, and chooses real reviewer IDs. No real database was provisioned, connected or migrated for this slice. The chosen HTTPS proxy/origin/cookie contract still needs a separate fix and verification: setting COOKIE_SECURE does not change the current request-protocol/Origin comparison. Durable uploads, shared sessions and real deployed probes/restarts are not established by local startup success. No public deployment URL is verified.
 
 ## Tests
 
@@ -112,7 +124,7 @@ PLAYWRIGHT_CHROMIUM_EXECUTABLE=/usr/bin/chromium npm run test:browser
 PLAYWRIGHT_DEV=1 PLAYWRIGHT_CHROMIUM_EXECUTABLE=/usr/bin/chromium npm run test:browser
 ```
 
-Runtime tests also cover health status/error redaction, bounded shared probes, draining, both termination signals with an in-flight request, resource cleanup failures, forced deadlines and built production probes. CI on Node 22 runs type checking, build, API tests and Chromium browser coverage. Build warnings for outdated Browserslist data and PostCSS remain. Coverage is not exhaustive: production session persistence, database runtime tests, independent food-safety verification, hardware telemetry and deployment hardening remain follow-ups. Deterministic session-expiry HTTP tests cover the instant before expiry, the exact 12-hour boundary, stale-cookie rejection and fresh-login/logout behavior. Membership and review tests cover permission boundaries, consent, revocation, self-review denial, audit history and invalidation.
+Startup subprocess tests were first run against unchanged merged main (15 cases: 4 passed, 11 failed, 0 skipped), then against the fix. Config tests cover parsing/redaction and a shared storage/reviewer deadline with controlled local dependencies; no real database or provider credentials are used. Runtime tests also cover health status/error redaction, bounded shared probes, draining, both termination signals with an in-flight request, resource cleanup failures, forced deadlines and built production probes. CI on Node 22 runs type checking, build, API tests and Chromium browser coverage. Build warnings for outdated Browserslist data and PostCSS remain. Coverage is not exhaustive: production session persistence, database runtime tests, independent food-safety verification, hardware telemetry and deployment hardening remain follow-ups. Deterministic session-expiry HTTP tests cover the instant before expiry, the exact 12-hour boundary, stale-cookie rejection and fresh-login/logout behavior. Membership and review tests cover permission boundaries, consent, revocation, self-review denial, audit history and invalidation.
 
 ## Licence and program log
 
